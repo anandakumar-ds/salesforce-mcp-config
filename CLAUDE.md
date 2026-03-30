@@ -20,9 +20,14 @@ When asked about "revenue", "reported revenue", "actual revenue":
 ### 2. Order Bookings (deals won on Opportunity)
 When asked about "bookings", "order value", "deals won":
 - **Object**: Opportunity
-- **Stage Filter**: `StageName IN ('Order', 'POC')`
+- **Stages**: `Order` and `POC` (queried separately, NOT combined)
 - **Date Field**: `B_Deal_Date__c` (NOT CloseDate)
 - **Value Field**: `Net_New_INR__c` (formula, already in INR)
+- **Booking Value Formula** (Tableau-validated):
+  - Order stage: `Net_New_INR__c` (full value)
+  - POC stage: `Net_New_INR__c / 36` (normalized — POC = 36-month commitment)
+  - Total Booking = SUM(Order Net_New_INR__c) + SUM(POC Net_New_INR__c) / 36
+- **Two-query pattern**: Always generate separate queries for Order and POC stages. The summary step applies the /36 division to POC and combines.
 - `Net_New__c` — Raw net new value (DOUBLE, set by Finance)
 
 ### Default: Use `accounts_revenue__c` for revenue questions unless user specifically asks about deals/bookings/pipeline.

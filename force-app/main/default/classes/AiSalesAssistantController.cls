@@ -20,6 +20,220 @@ public with sharing class AiSalesAssistantController {
     @TestVisible
     private static AskSF_Domain__mdt testDomainOverride;
 
+    // ── Per-User Co-Pilot: User Context ──────────────────────────────────
+
+    /**
+     * Represents the logged-in user's identity, role, and territory for
+     * personalizing Ask Salesforce queries. Resolved once per transaction.
+     */
+    public class UserContext {
+        public String userId;
+        public String userName;
+        public String firstName;
+        public String roleName;
+        public String profileName;
+        public String cluster;    // derived from role name or owned accounts
+        public String region;     // derived from role name or owned accounts
+        public String persona;    // AD, CSM, SDR, VP, ClusterHead, Support, Admin
+    }
+
+    // Transaction-scoped cache (same pattern as cachedAccessToken)
+    @TestVisible
+    private static UserContext cachedUserContext;
+
+    // Allow tests to inject a mock UserContext
+    @TestVisible
+    private static UserContext testUserContextOverride;
+
+    /**
+     * Resolves the running user's context: identity, role, persona, cluster, region.
+     * Costs 1 SOQL query (cached for the transaction). UserInfo methods are free.
+     */
+    @TestVisible
+    private static UserContext resolveUserContext() {
+        if (testUserContextOverride != null) return testUserContextOverride;
+        if (cachedUserContext != null) return cachedUserContext;
+
+        UserContext uc = new UserContext();
+        uc.userId = UserInfo.getUserId();
+        uc.userName = UserInfo.getName();
+        uc.firstName = UserInfo.getFirstName();
+
+        // Query role and profile (1 SOQL)
+        List<User> users = [
+            SELECT Id, Name, UserRole.Name, Profile.Name
+            FROM User
+            WHERE Id = :uc.userId
+            LIMIT 1
+        ];
+        if (!users.isEmpty()) {
+            User u = users[0];
+            uc.roleName = u.UserRole != null ? u.UserRole.Name : '';
+            uc.profileName = u.Profile != null ? u.Profile.Name : '';
+        } else {
+            uc.roleName = '';
+            uc.profileName = '';
+        }
+
+        // Derive persona from role name
+        uc.persona = derivePersona(uc.roleName, uc.profileName);
+
+        // Derive cluster/region from role name
+        deriveTerritory(uc);
+
+        cachedUserContext = uc;
+        return uc;
+    }
+
+    /**
+     * Maps Salesforce role names to a co-pilot persona.
+     */
+    private static String derivePersona(String roleName, String profileName) {
+        if (String.isBlank(roleName)) {
+            // Fall back to profile
+            if (profileName != null && profileName.containsIgnoreCase('System Administrator')) {
+                return 'Admin';
+            }
+            return 'User';
+        }
+        String r = roleName.toLowerCase();
+
+        if (r.contains('cro') || r.contains('vp') || r.contains('sales head') || r.contains('chief')) {
+            return 'VP';
+        }
+        if (r.contains('sdr') || r.contains('sd manager') || r.contains('inside sales')) {
+            return 'SDR';
+        }
+        if (r.contains('csm') || r.startsWith('cx_') || r.startsWith('cx ')) {
+            return 'CSM';
+        }
+        if (r.contains('cluster head') || r.contains('clusterhead')) {
+            return 'ClusterHead';
+        }
+        if (r.contains('saas') || r.contains('support') || r.contains('ameyo care')) {
+            return 'Support';
+        }
+        if (r.contains('sales') || r.contains('account') || r.contains('am ') || r.contains('ad ')) {
+            return 'AD';
+        }
+        if (profileName != null && profileName.containsIgnoreCase('System Administrator')) {
+            return 'Admin';
+        }
+        return 'User';
+    }
+
+    /**
+     * Derives cluster and region from the user's role name.
+     * Role naming convention: "Sales_BFSI", "CSM_Technology", "International Sales Head", etc.
+     * Falls back to most-owned accounts if role name is ambiguous.
+     */
+    private static void deriveTerritory(UserContext uc) {
+        String r = (uc.roleName != null) ? uc.roleName : '';
+
+        // Region detection from role name
+        if (r.containsIgnoreCase('International') || r.containsIgnoreCase('APAC') ||
+            r.containsIgnoreCase('ME ') || r.containsIgnoreCase('Africa') ||
+            r.containsIgnoreCase('Americas')) {
+            uc.region = 'International';
+        } else if (r.containsIgnoreCase('Domestic') || r.containsIgnoreCase('Enterprise')) {
+            uc.region = 'Domestic Enterprise';
+        } else if (r.containsIgnoreCase('Scaleup') || r.containsIgnoreCase('Scale')) {
+            uc.region = 'Scaleup';
+        }
+
+        // Cluster detection from role name (common patterns)
+        Map<String, String> clusterPatterns = new Map<String, String>{
+            'BFSI' => 'Banking and Insurance',
+            'Banking' => 'Banking and Insurance',
+            'FinServ' => 'Financial Services',
+            'Financial' => 'Financial Services',
+            'Technology' => 'Technology',
+            'Retail' => 'Retail',
+            'Marketplace' => 'Marketplace',
+            'Mobility' => 'Mobility',
+            'Services' => 'Services',
+            'SMB' => 'SMB',
+            'Mid Market' => 'Mid Market',
+            'MidMarket' => 'Mid Market',
+            'UAE' => 'UAE',
+            'KSA' => 'KSA',
+            'Africa' => 'Africa'
+        };
+        for (String pattern : clusterPatterns.keySet()) {
+            if (r.containsIgnoreCase(pattern)) {
+                uc.cluster = clusterPatterns.get(pattern);
+                break;
+            }
+        }
+
+        // If cluster/region still unknown and persona is not VP/Admin, try owned accounts
+        if (uc.cluster == null && uc.region == null &&
+            uc.persona != 'VP' && uc.persona != 'Admin') {
+            try {
+                List<AggregateResult> accts = [
+                    SELECT Cluster__c cls, Region__c rgn, COUNT(Id) cnt
+                    FROM Account
+                    WHERE OwnerId = :uc.userId
+                    AND Cluster__c != null
+                    GROUP BY Cluster__c, Region__c
+                    ORDER BY COUNT(Id) DESC
+                    LIMIT 1
+                ];
+                if (!accts.isEmpty()) {
+                    if (uc.cluster == null) {
+                        uc.cluster = (String) accts[0].get('cls');
+                    }
+                    if (uc.region == null) {
+                        uc.region = (String) accts[0].get('rgn');
+                    }
+                }
+            } catch (Exception e) {
+                System.debug(LoggingLevel.WARN, 'Territory derivation from accounts failed: ' + e.getMessage());
+            }
+        }
+    }
+
+    // ── Scope Detection ──────────────────────────────────────────────────
+
+    /**
+     * Detects whether the user's question has personal scope ("my"), team scope ("my team/cluster"),
+     * or org-wide scope (default). Returns: 'PERSONAL', 'TEAM', or 'ORG'.
+     */
+    @TestVisible
+    private static String detectScope(String question) {
+        if (String.isBlank(question)) return 'ORG';
+        String q = question.toLowerCase();
+
+        // Team scope patterns (check first — "my team" is TEAM, not PERSONAL)
+        if (q.contains('my team') || q.contains('my cluster') || q.contains('my region') ||
+            q.contains('our team') || q.contains('our cluster') || q.contains('our region') ||
+            q.contains('team pipeline') || q.contains('team deals') || q.contains('team revenue') ||
+            q.contains('team performance') || q.contains('team booking')) {
+            return 'TEAM';
+        }
+
+        // Personal scope — word-boundary matching to avoid false positives
+        // Check for "my" not preceded/followed by alpha chars (avoids "Miami", "myths", etc.)
+        Pattern personalPattern = Pattern.compile('(?i)\\b(my deals|my pipeline|my accounts|my revenue|my bookings|my opportunities|my leads|my tickets|my cases|my meetings|my funnel|my target|my gp|for me|assigned to me|i own|my customers|my performance|my numbers|my quota|my achievement)\\b');
+        if (personalPattern.matcher(q).find()) {
+            return 'PERSONAL';
+        }
+
+        // Simpler "my" + noun pattern — but exclude common false positives
+        Pattern simpleMyPattern = Pattern.compile('(?i)\\bmy\\s+\\w+');
+        Matcher myMatcher = simpleMyPattern.matcher(q);
+        if (myMatcher.find()) {
+            String afterMy = myMatcher.group().toLowerCase();
+            // Exclude false positives
+            if (!afterMy.contains('my opinion') && !afterMy.contains('my question') &&
+                !afterMy.contains('my understanding') && !afterMy.contains('my request')) {
+                return 'PERSONAL';
+            }
+        }
+
+        return 'ORG';
+    }
+
     /**
      * Resolves the domain capability record for a given Salesforce object.
      * Uses AskSF_Domain__mdt custom metadata — queries are free (no SOQL limit cost).
@@ -89,6 +303,11 @@ public with sharing class AiSalesAssistantController {
         '- For customer rankings: use ONLY Customer_Universal_Account__r.Name as dimension. Do NOT add SKU, Cluster, Currency, or any other dimension — keep it simple like CRM Buddy. Add filter {"field":"Customer_Universal_Account__c","op":"!=","value":null}.\n' +
         '- Use BETWEEN op only in dateFilter; use IN op for picklist multi-value filters.\n' +
         '- detail intent is NOT allowed for accounts_revenue__c (too many rows). Use aggregate or ranking.\n' +
+        '- If a [User Context] block with SCOPE: PERSONAL is present, add an ownership filter:\n' +
+        '  For AD/Sales persona: {"field":"Account_Manager__c","op":"=","value":"<userId from context>"}\n' +
+        '  For CSM persona: {"field":"CSM__c","op":"=","value":"<userId from context>"}\n' +
+        '- If SCOPE: TEAM is present, add cluster/region filter from the context block:\n' +
+        '  {"field":"Customer_Universal_Account__r.Cluster__c","op":"=","value":"<cluster from context>"}\n' +
         '</instructions>\n\n' +
         '<examples>\n' +
         'Q: "Total revenue this year"\n' +
@@ -292,6 +511,10 @@ public with sharing class AiSalesAssistantController {
             allowedFilterFields.add('revenue_booked_on__c');
             allowedFilterFields.add('account__c');
             allowedFilterFields.add('customer_universal_account__c');
+            // Per-user co-pilot: allow ownership filters for personal/team scope
+            allowedFilterFields.add('account_manager__c');
+            allowedFilterFields.add('csm__c');
+            allowedFilterFields.add('customer_universal_account__r.ownerid');
 
             for (Object fObj : filters) {
                 Map<String, Object> f = (Map<String, Object>) fObj;
@@ -1594,7 +1817,7 @@ public with sharing class AiSalesAssistantController {
         '  "open funnel" / "open pipeline" / "active deals" / "active opportunities" → StageName IN (\'Prospect\',\'Approach\',\'Proposal\',\'Negotiation\',\'SDF Submission\',\'On Hold\',\'Closed won - Pending\')\n' +
         '    Only deals not yet won or lost.\n' +
         '  "closed funnel" / "closed deals" / "lost deals" → StageName IN (\'Closed Unknown\',\'Closed Duplicate\',\'Closed-No decision\',\'Closed Lost\',\'POC Closed\')\n' +
-        '  "order" / "booking" / "won deals" → StageName IN (\'POC\',\'Order\')\n' +
+        '  "order" / "booking" / "won deals" → TWO queries: Q1 with StageName = \'Order\', Q2 with StageName = \'POC\' (POC value divided by 36 in summary)\n' +
         '  NOTE: Suspect is NOT in any concept above. Only include if user explicitly asks for "suspects" or "all stages".\n' +
         '  NEVER use IsClosed = false (SF IsClosed flag is inconsistent with these mappings).\n' +
         '  VALUE FIELD: Use Normalize_Amount_INR__c (formula, already INR-normalized — matches Tableau dashboard).\n' +
@@ -1658,6 +1881,7 @@ public with sharing class AiSalesAssistantController {
         'Each query goes in its own ```soql block with a -- comment label above it.\n' +
         'The summary step will join results across queries and compute the metric.\n\n' +
         'WHEN to use multiple queries:\n' +
+        '- BOOKINGS (ALWAYS): Q1=Order stage deals, Q2=POC stage deals (POC/36 in summary)\n' +
         '- Win/conversion rate: Q1=won deals, Q2=all consumed deals\n' +
         '- Period comparison: Q1=current period, Q2=previous period\n' +
         '- Segment benchmark: Q1=specific segment, Q2=overall\n' +
@@ -1698,8 +1922,8 @@ public with sharing class AiSalesAssistantController {
         'GROUP BY Customer_Universal_Account__r.Cluster__c LIMIT 2000\n' +
         '```\n\n' +
         '=== CURRENCY ===\n' +
-        'Net_New_INR__c on Opportunity is ALREADY normalized to INR — BUT only populated for WON deals (Stage=Order).\n' +
-        '  USE Net_New_INR__c for: bookings, order value, won deal rankings, revenue from Opportunity.\n' +
+        'Net_New_INR__c on Opportunity is ALREADY normalized to INR — populated for WON deals (Stage=Order and POC).\n' +
+        '  USE Net_New_INR__c for: bookings (Order full value + POC/36), order value, won deal rankings.\n' +
         '  DO NOT use Net_New_INR__c for: pipeline value, win rate denominators, lost deal analysis (it will be 0).\n' +
         '  For pipeline/open deals: use Amount (auto-converted by SF multi-currency) or MRR_Amount__c.\n' +
         '  NEVER filter by CurrencyIsoCode and NEVER GROUP BY CurrencyIsoCode for rankings.\n' +
@@ -1796,12 +2020,32 @@ public with sharing class AiSalesAssistantController {
         '    Universal_Acc_AM__c, Account_Geography__c, Total_Rev_break_Amount__c\n\n' +
         '** SOURCE 2 - ORDER BOOKINGS (for "bookings", "deals won", "order value"): **\n' +
         '  Object: Opportunity\n' +
-        '  Stage Filter: StageName IN (\'Order\',\'POC\')\n' +
         '  Date Field: B_Deal_Date__c (NOT CloseDate)\n' +
         '  Value Field: Net_New_INR__c (formula, already in INR)\n' +
+        '  ⚠️ BOOKING VALUE FORMULA (Tableau-validated):\n' +
+        '    Order stage: full Net_New_INR__c\n' +
+        '    POC stage: Net_New_INR__c / 36 (normalized — POC is a 36-month commitment)\n' +
+        '  ⚠️ MANDATORY TWO-QUERY PATTERN for ALL booking questions:\n' +
+        '    ALWAYS generate TWO separate queries for bookings:\n' +
+        '    -- Query 1: Order bookings\n' +
+        '    ```soql\n' +
+        '    SELECT <dimensions>, SUM(Net_New_INR__c) orderBooking, COUNT(Id) orderCount\n' +
+        '    FROM Opportunity WHERE StageName = \'Order\'\n' +
+        '    AND B_Deal_Date__c >= <start> AND B_Deal_Date__c <= <end>\n' +
+        '    GROUP BY <dimensions> ORDER BY SUM(Net_New_INR__c) DESC LIMIT 2000\n' +
+        '    ```\n' +
+        '    -- Query 2: POC bookings (to be divided by 36 in summary)\n' +
+        '    ```soql\n' +
+        '    SELECT <dimensions>, SUM(Net_New_INR__c) pocRawValue, COUNT(Id) pocCount\n' +
+        '    FROM Opportunity WHERE StageName = \'POC\'\n' +
+        '    AND B_Deal_Date__c >= <start> AND B_Deal_Date__c <= <end>\n' +
+        '    GROUP BY <dimensions> ORDER BY SUM(Net_New_INR__c) DESC LIMIT 2000\n' +
+        '    ```\n' +
+        '    The summary step will compute: Total Booking = Order value + (POC value / 36) per dimension.\n' +
+        '    NEVER combine Order and POC in a single query with StageName IN (\'Order\',\'POC\').\n' +
         '  ⚠️ DO NOT exclude negative values: NEVER add "AND Net_New_INR__c >= 0". Negative values (reversals) are part of the booking total.\n' +
-        '  ⚠️ DO NOT include Opportunity_Line_Item_Count__c. No dedup needed — SUM(Net_New_INR__c) gives the correct total directly.\n' +
-        '  KEEP IT SIMPLE: Just SUM(Net_New_INR__c) with the stage and date filters. No extra filters, no dedup.\n\n' +
+        '  ⚠️ DO NOT include Opportunity_Line_Item_Count__c. No dedup needed.\n' +
+        '  KEEP IT SIMPLE: Just SUM(Net_New_INR__c) with stage and date filters. No extra filters, no dedup.\n\n' +
         'DEFAULT: Use accounts_revenue__c for revenue questions unless user\n' +
         '  specifically asks about deals/bookings/pipeline/opportunities.\n' +
         'SECTOR queries: Use Customer_Universal_Account__r.Cluster__c on accounts_revenue__c, or Account_Cluster__c on Opportunity.\n' +
@@ -2134,13 +2378,13 @@ public with sharing class AiSalesAssistantController {
         '    GROUP BY Customer_Universal_Account__r.Cluster__c, Customer_Universal_Account__r.Name ORDER BY SUM(Revenue_Booked_Amount__c) DESC LIMIT 2000\n' +
         '  NRR = SUM(current) / SUM(preceding) x 100 (includes expansion/upsell).\n' +
         '    Only include dimensions where BOTH periods have revenue (exclude zero-revenue prior period).\n' +
-        '  GRR = same but: (1) filter Revenue_Classification__c IN (Retention 2, Retention 3),\n' +
+        '  GRR = same but: (1) filter Revenue_Classification__c IN (Retention2, Retention3),\n' +
         '    (2) cap numerator at denominator per dimension (max 100%).\n' +
         '  NRR variants (per CRM Buddy): This Month vs Same Month Last Year, Rolling 12M, YTD, QRR (YoY), QRR Rolling 3M.\n' +
         '  NRGP (Net Revenue Growth Percentage): Current period GP / Previous period GP × 100.\n' +
-        '    Only Revenue_Classification = Retention 2, Retention 3. Includes expansion.\n' +
+        '    Only Revenue_Classification__c IN (Retention2, Retention3). Includes expansion.\n' +
         '  GRGP (Gross Revenue Growth Percentage): Same but numerator capped at denominator (max 100%).\n' +
-        '    Only Revenue_Classification = Retention 2, Retention 3 (numerator: Retention 3 only per CRM Buddy).\n' +
+        '    Only Revenue_Classification__c IN (Retention2, Retention3) (numerator: Retention3 only per CRM Buddy).\n' +
         '  Keyholes: Customer_Universal_Account__r.Region__c, Customer_Universal_Account__r.Cluster__c, Parent_SKU__c, SKU__c, AD/CSM.\n\n' +
         'GP / GROSS PROFIT — from Tableau Revenue Dashboard (accounts_revenue__c):\n' +
         '  ⚠️ SAME GOVERNOR LIMIT AS REVENUE. GP queries on accounts_revenue__c MUST split H1/H2.\n' +
@@ -2269,11 +2513,22 @@ public with sharing class AiSalesAssistantController {
         '21. NOT LIKE syntax: WRONG: field NOT LIKE \'%x%\'. RIGHT: (NOT field LIKE \'%x%\'). The NOT goes BEFORE the field.\n' +
         '22. Aggregate aliases: WRONG: ORDER BY ticket_count. RIGHT: ORDER BY COUNT(Id). SOQL does NOT support aliases in ORDER BY.\n\n' +
         '=== PERSONAL vs ORG-WIDE QUERIES ===\n' +
-        'If the user prompt contains first-person pronouns ("I", "me", "my", "mine", "for me"):\n' +
-        '  ADD an ownership filter: Owner.Name = \'[logged-in user name from context]\' or OwnerId = \'[userId]\'.\n' +
-        '  Example: "my deals" → WHERE OwnerId = :currentUserId\n' +
-        '  Example: "my pipeline" → add OwnerId filter to pipeline query.\n' +
-        'Otherwise, return ORG-WIDE data by default. Do NOT apply ownership filters for general questions.\n\n' +
+        'If a [User Context] block is present in the question, it provides the logged-in user identity and scope.\n' +
+        'SCOPE: PERSONAL — add ownership filter using the User Id from the context block:\n' +
+        '  On Opportunity: WHERE OwnerId = \'<userId from context>\'\n' +
+        '  On accounts_revenue__c: WHERE Account_Manager__c = \'<userId>\' (for AD/Sales persona)\n' +
+        '  On accounts_revenue__c: WHERE CSM__c = \'<userId>\' (for CSM persona)\n' +
+        '  On Case: WHERE OwnerId = \'<userId>\'\n' +
+        '  On Lead: WHERE OwnerId = \'<userId>\'\n' +
+        '  On Event: WHERE OwnerId = \'<userId>\'\n' +
+        '  On Account: WHERE OwnerId = \'<userId>\' (for AD), WHERE Account_CSM__c = \'<userId>\' (for CSM)\n' +
+        '  If persona=CSM, use Co_owner__c on Opportunity, CSM__c on accounts_revenue__c, Account_CSM__c on Account.\n' +
+        'SCOPE: TEAM — filter by the Cluster/Region values provided in the context block.\n' +
+        '  On Opportunity: WHERE Account_Cluster__c = \'<cluster>\' AND/OR Account_Region__c = \'<region>\'\n' +
+        '  On accounts_revenue__c: WHERE Customer_Universal_Account__r.Cluster__c = \'<cluster>\'\n' +
+        '  On Account: WHERE Cluster__c = \'<cluster>\' AND/OR Region__c = \'<region>\'\n' +
+        'No [User Context] block = ORG-WIDE (no ownership filter). Do NOT apply ownership filters for general questions.\n' +
+        'NEVER hardcode user names in SOQL. Always use the Id from the [User Context] block.\n\n' +
         '=== GRANULARITY MANDATE ===\n' +
         'For simple total questions ("total pipeline", "total revenue"), include ONE dimensional breakdown:\n' +
         '  - Opportunity queries: GROUP BY Account_Cluster__c (or StageName, Owner.Name, Account_Region__c).\n' +
@@ -2299,6 +2554,11 @@ public with sharing class AiSalesAssistantController {
 
     private static final String SUMMARY_SYSTEM_PROMPT =
         'You are a senior business analyst at Exotel. Think like a VP of Sales reviewing data — don\'t just restate numbers, ANALYZE them.\n\n' +
+        'PERSONALIZATION:\n' +
+        '- If a [User Context] block is present, personalize your response.\n' +
+        '- For PERSONAL scope: Use "Your pipeline..." instead of "The pipeline...", address insights directly to the user.\n' +
+        '- For TEAM scope: Frame as "Your cluster/region..." (e.g., "Your Technology cluster revenue...").\n' +
+        '- For ORG scope (no context block): Use the standard org-wide framing.\n\n' +
         'HOW TO ANSWER:\n' +
         '- Lead with the key insight or headline finding, not a data dump.\n' +
         '- Group and categorize data (by region, loss reason, owner, segment, etc.) to reveal patterns.\n' +
@@ -2322,8 +2582,14 @@ public with sharing class AiSalesAssistantController {
         'When data uses Amount or Net_New__c with CurrencyIsoCode, show Indian deals in ₹ and ' +
         'International deals in $ but ALWAYS include an INR-equivalent total for unified comparison ' +
         '(1 USD=83 INR, 1 AED=23 INR). Never omit international reps from leaderboards.\n\n' +
-        'BOOKING VALUES: SUM(Net_New_INR__c) is the correct booking total. No dedup needed. No reversal exclusion.\n' +
-        '  Do NOT divide by Opportunity_Line_Item_Count__c. Do NOT show "adjusted" or "deduped" totals.\n\n' +
+        'BOOKING VALUES (Tableau-validated formula):\n' +
+        '  Booking data arrives as TWO queries: Query 1 = Order stage, Query 2 = POC stage.\n' +
+        '  Total Booking Value = SUM(Order Net_New_INR__c) + SUM(POC Net_New_INR__c) / 36\n' +
+        '  Per dimension: match by the GROUP BY key, then: booking = orderValue + (pocRawValue / 36)\n' +
+        '  ALWAYS show the combined total. Optionally break out Order vs POC contribution if insightful.\n' +
+        '  If only one query has results (e.g., no POC deals), use just that query\'s values.\n' +
+        '  Do NOT divide by Opportunity_Line_Item_Count__c. Do NOT show "adjusted" or "deduped" totals.\n' +
+        '  No reversal exclusion — negative values are part of the booking total.\n\n' +
         'QUARTER DEFINITIONS: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar. FY runs April to March.\n\n' +
         'SDR PERFORMANCE: Rank SDRs by downstream won Opportunity revenue (via Lead_Created_By__c),\n' +
         '  NOT by MRR_Amount__c on Lead (which has <10% fill rate). Show: deals won, total revenue,\n' +
@@ -2449,6 +2715,37 @@ public with sharing class AiSalesAssistantController {
             String dateContext = '\n[Today is ' + String.valueOf(today) +
                 '. Current FY started ' + fyStartYear + '-04-01.]';
             String enrichedQuestion = userQuestion + dateContext;
+
+            // ── Per-User Co-Pilot: Inject user context for personal/team queries ──
+            UserContext uc = resolveUserContext();
+            String queryScope = detectScope(userQuestion);
+
+            if (queryScope != 'ORG') {
+                String userContextBlock = '\n[User Context]\n' +
+                    'Logged-in user: ' + uc.userName + ' (Id: ' + uc.userId + ')\n' +
+                    'Role: ' + uc.roleName + '\n' +
+                    'Persona: ' + uc.persona + '\n';
+
+                if (queryScope == 'PERSONAL') {
+                    userContextBlock += 'SCOPE: PERSONAL — filter by OwnerId = \'' + uc.userId + '\'\n';
+                    if (uc.persona == 'CSM') {
+                        userContextBlock += 'CSM ownership: On Opportunity use Co_owner__c. On accounts_revenue__c use CSM__c. On Account use Account_CSM__c.\n';
+                    }
+                } else if (queryScope == 'TEAM') {
+                    userContextBlock += 'SCOPE: TEAM — ';
+                    if (uc.cluster != null) {
+                        userContextBlock += 'Filter by Cluster = \'' + uc.cluster + '\'. ';
+                    }
+                    if (uc.region != null) {
+                        userContextBlock += 'Filter by Region = \'' + uc.region + '\'. ';
+                    }
+                    userContextBlock += '\n';
+                }
+
+                enrichedQuestion = userQuestion + dateContext + userContextBlock;
+                System.debug('CO-PILOT: Scope=' + queryScope + ', Persona=' + uc.persona +
+                    ', User=' + uc.userName + ', Cluster=' + uc.cluster + ', Region=' + uc.region);
+            }
 
             // Step -1: KPI deterministic engine (no Claude for query generation)
             // Must run BEFORE conversation history prepend — uses raw question for phrase matching

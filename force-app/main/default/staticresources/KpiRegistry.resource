@@ -164,7 +164,7 @@
       "measureField": "Revenue_Booked_Amount__c",
       "measureFn": "SUM",
       "questionTerms": ["grr", "gross revenue retention"],
-      "extraFilters": "AND Revenue_Classification__c IN ('Retention 2','Retention 3')",
+      "extraFilters": "AND Revenue_Classification__c IN ('Retention2','Retention3')",
       "capNumerator": true,
       "defaultDimension": "Customer_Universal_Account__r.Cluster__c",
       "supportedDimensions": {
@@ -174,7 +174,7 @@
       },
       "supportedTimeGrains": ["FY", "Q", "M"],
       "resultFormat": "PERCENT",
-      "interpretationNote": "GRR = Current period revenue / Previous period revenue × 100, excluding expansion. Numerator capped at denominator (max 100%). Only Revenue_Classification = Retention 2 or Retention 3. Uses accounts_revenue__c."
+      "interpretationNote": "GRR = Current period revenue / Previous period revenue × 100, excluding expansion. Numerator capped at denominator (max 100%). Only Revenue_Classification = Retention2 or Retention3. Uses accounts_revenue__c."
     },
     {
       "id": "NRGP",
@@ -187,7 +187,7 @@
       "measureField": "GP__c",
       "measureFn": "SUM",
       "questionTerms": ["nrgp", "net revenue growth percentage", "net gp retention", "net gross profit retention", "net gpr", "gp retention"],
-      "extraFilters": "AND Revenue_Classification__c IN ('Retention 2','Retention 3')",
+      "extraFilters": "AND Revenue_Classification__c IN ('Retention2','Retention3')",
       "defaultDimension": "Customer_Universal_Account__r.Cluster__c",
       "supportedDimensions": {
         "cluster": "Customer_Universal_Account__r.Cluster__c",
@@ -196,7 +196,7 @@
       },
       "supportedTimeGrains": ["FY", "Q", "M"],
       "resultFormat": "PERCENT",
-      "interpretationNote": "NRGP = Current period GP / Previous period GP × 100 (Retention 2 + Retention 3 only). Measures GP growth including expansion. >100% = net GP growth. Uses accounts_revenue__c GP__c field."
+      "interpretationNote": "NRGP = Current period GP / Previous period GP × 100 (Retention2 + Retention3 only). Measures GP growth including expansion. >100% = net GP growth. Uses accounts_revenue__c GP__c field."
     },
     {
       "id": "GRGP",
@@ -209,7 +209,7 @@
       "measureField": "GP__c",
       "measureFn": "SUM",
       "questionTerms": ["grgp", "gross revenue growth percentage", "gross gp retention", "gross gross profit retention", "gross gpr"],
-      "extraFilters": "AND Revenue_Classification__c IN ('Retention 2','Retention 3')",
+      "extraFilters": "AND Revenue_Classification__c IN ('Retention2','Retention3')",
       "capNumerator": true,
       "defaultDimension": "Customer_Universal_Account__r.Cluster__c",
       "supportedDimensions": {
@@ -219,7 +219,7 @@
       },
       "supportedTimeGrains": ["FY", "Q", "M"],
       "resultFormat": "PERCENT",
-      "interpretationNote": "GRGP = Current period GP / Previous period GP × 100, excluding expansion (capped at 100%). Only Retention 2 + Retention 3. Uses accounts_revenue__c GP__c field."
+      "interpretationNote": "GRGP = Current period GP / Previous period GP × 100, excluding expansion (capped at 100%). Only Retention2 + Retention3. Uses accounts_revenue__c GP__c field."
     }
   ]
 }
