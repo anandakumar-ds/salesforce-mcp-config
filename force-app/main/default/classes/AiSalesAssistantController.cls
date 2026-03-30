@@ -2584,10 +2584,17 @@ public with sharing class AiSalesAssistantController {
         '(1 USD=83 INR, 1 AED=23 INR). Never omit international reps from leaderboards.\n\n' +
         'BOOKING VALUES (Tableau-validated formula):\n' +
         '  Booking data arrives as TWO queries: Query 1 = Order stage, Query 2 = POC stage.\n' +
-        '  Total Booking Value = SUM(Order Net_New_INR__c) + SUM(POC Net_New_INR__c) / 36\n' +
-        '  Per dimension: match by the GROUP BY key, then: booking = orderValue + (pocRawValue / 36)\n' +
-        '  ALWAYS show the combined total. Optionally break out Order vs POC contribution if insightful.\n' +
-        '  If only one query has results (e.g., no POC deals), use just that query\'s values.\n' +
+        '  ⚠️ MANDATORY MERGE BEFORE DISPLAY:\n' +
+        '  Step 1: For EACH dimension key (cluster, region, etc.), compute:\n' +
+        '    combined_value = orderValue + (pocRawValue / 36)\n' +
+        '  Step 2: The HEADLINE TOTAL must equal the sum of ALL combined dimension values.\n' +
+        '  Step 3: The TABLE must show the combined_value per dimension, NOT just Order values.\n' +
+        '  Step 4: Cross-check: sum of all table rows MUST equal the headline total. If not, recompute.\n' +
+        '  If a cluster appears only in Order: combined = orderValue + 0.\n' +
+        '  If a cluster appears only in POC: combined = 0 + (pocRawValue / 36).\n' +
+        '  If a cluster appears in both: combined = orderValue + (pocRawValue / 36).\n' +
+        '  NEVER show the headline as one number and table rows that sum to a different number.\n' +
+        '  If only one query has results (e.g., no POC deals), use just that query values.\n' +
         '  Do NOT divide by Opportunity_Line_Item_Count__c. Do NOT show "adjusted" or "deduped" totals.\n' +
         '  No reversal exclusion — negative values are part of the booking total.\n\n' +
         'QUARTER DEFINITIONS: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar. FY runs April to March.\n\n' +
@@ -2604,12 +2611,14 @@ public with sharing class AiSalesAssistantController {
         '  - ALWAYS present BOTH value and count win rates. A large gap means "winning small deals, losing large ones" (or vice versa).\n' +
         '  - Consumed includes Negotiation stage (deals that reached pricing/terms). This matches Tableau Key KPIs dashboard.\n' +
         '  - Rank dimensions (clusters, owners, etc.) by win rate and highlight best/worst performers.\n\n' +
-        'TOTALS ACCURACY: When computing grand totals from query results:\n' +
-        '  - ALWAYS sum ALL rows in the result set, not just the ones shown in the table.\n' +
+        'TOTALS ACCURACY (CRITICAL — violating this erodes user trust):\n' +
+        '  - The HEADLINE TOTAL must ALWAYS equal the sum of ALL rows in the breakdown table.\n' +
+        '  - NEVER derive the headline from a separate computation and the table from another. Use ONE data path.\n' +
+        '  - Correct approach: sum all rows first → that IS the headline. Then show the rows.\n' +
         '  - If you abbreviate the table (show top 10 of 24 rows), the TOTAL must still include ALL 24 rows.\n' +
         '  - For H1+H2 splits: compute each half\'s total by summing ALL rows in that query, then add both halves.\n' +
-        '  - Show the total first, THEN the breakdown. Never compute the total from the abbreviated table.\n' +
-        '  - Cross-check: the grand total should equal the sum of every individual row. If it doesn\'t, recount.\n\n' +
+        '  - For Order+POC booking splits: merge by dimension key FIRST, then sum merged values for headline.\n' +
+        '  - SELF-CHECK: Before responding, verify that sum(table rows) == headline. If not, FIX IT.\n\n' +
         'MULTI-QUERY RESULTS: When you receive labeled result sets from multiple queries:\n' +
         '  - Join datasets by matching dimensions (cluster, owner, region, etc.).\n' +
         '  - Compute the requested metric: Win Rate = Won/Total × 100, Growth = (Current-Previous)/Previous × 100.\n' +
