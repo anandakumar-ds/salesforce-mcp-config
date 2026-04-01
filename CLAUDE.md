@@ -106,6 +106,69 @@ When users ask about "pipeline", "funnel", "open funnel", "bookings", or "closed
 |-----------|---------|
 | Reversals, Reversal | Partial Reversal, Reversal Reversal |
 
+### Revenue Classification Slang (on `accounts_revenue__c.Revenue_Classification__c`)
+| User Says | Maps To (Database Value) |
+|-----------|------------------------|
+| Net New | Scaleup1, Scaleup2, Retention1, Retention2 |
+| Organic | Retention3 |
+| Scaleup | Scaleup1, Scaleup2 |
+| Retention | Retention1, Retention2, Retention3 |
+| Churn | Filter via `Account.Churned_Day__c > 0` or `Account.Customer_Health__c` |
+| At Risk, Likely to churn | Filter via `Account.Customer_Health__c` |
+
+### Parent SKU Slang (on `accounts_revenue__c.Products__c`)
+| User Says | Maps To |
+|-----------|---------|
+| Voice | Voice |
+| SMS | SMS |
+| WhatsApp, WA | Whatsapp, WhatsApp Conversational |
+| CC, ECC, Contact Center | Ameyo, Ameyo Emerge, Ameyo Engage, Ameyo Fusion CX, VoIP-CC |
+| Truecaller, TC | Truecaller |
+| Chatbot | Chatbot |
+| Subscription | Subscription |
+| Rental | Rental, Rental & Others |
+
+### SKU Slang (on `accounts_revenue__c.SKU__c` and `Opportunity.SKU__c`)
+| User Says | Maps To |
+|-----------|---------|
+| PF Voice | PF Voice |
+| ECC, Enterprise CC | Enterprise CC |
+| PF Voice CC | PF Voice CC |
+| SMS | PF Messaging SMS |
+| WhatsApp, WA | PF Messaging Whatsapp |
+| TC, Truecaller | PF Others TC |
+| AI, Conversational AI | Conversational AI |
+| Voicebot | Voicebot |
+| Chatbot | Chatbot |
+| CQA | CQA |
+| VSIP | VSIP |
+| Voice Streaming | Voice Streaming |
+| RCS | PF Messaging RCS |
+
+### Classification Slang (on `accounts_revenue__c.Classification__c`)
+| User Says | Maps To |
+|-----------|---------|
+| Up sell, Upsell | Up sell |
+| Net New | Net New |
+| New Sales | New Sales |
+| Cross sell | Cross sell |
+| POC | POC |
+| Expansion | Expansion |
+
+## Revenue Cost & Profitability Fields (on `accounts_revenue__c`)
+
+These fields enable GP analysis directly from Salesforce:
+- `GP__c` (DOUBLE) — Gross Profit
+- `Variable_Cost__c` (DOUBLE) — Variable cost component
+- `Fixed_Cost__c` (DOUBLE) — Fixed cost component
+- `Total_Cost__c` (DOUBLE) — Total cost (Variable + Fixed)
+- `Norm_Rev_Amount__c` (DOUBLE) — Normalized revenue amount
+- **GP Margin** = `GP__c / Revenue_Booked_Amount__c` (compute in query or post-processing)
+
+### Churn & Health Fields (on `Account`)
+- `Customer_Health__c` (STRING) — Customer health status
+- `Churned_Day__c` (DOUBLE) — Number of churned days (NOT a date; > 0 means churned)
+
 ## Key Salesforce Objects & Fields
 
 ### Opportunity
