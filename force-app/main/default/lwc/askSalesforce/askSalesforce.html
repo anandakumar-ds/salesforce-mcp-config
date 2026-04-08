@@ -15,11 +15,12 @@
             <template lwc:if={showWelcome}>
                 <div class="welcome-box">
                     <lightning-icon icon-name="standard:bot" size="large"></lightning-icon>
-                    <h2 class="welcome-title">Ask Salesforce</h2>
-                    <p class="welcome-text">Ask me anything about your pipeline, deals, leads, cases and more. I'll query Salesforce and summarize the results for you.</p>
+                    <h2 class="welcome-title">{welcomeGreeting}</h2>
+                    <p class="welcome-text">I&apos;m your Salesforce assistant — ask me anything about your pipeline, bookings, revenue, leads, or cases, and I&apos;ll fetch the data and break it down for you.</p>
                     <div class="suggested-questions">
-                        <button class="suggestion-chip" onclick={handleSuggestion} data-question="How many deals closed this quarter?">How many deals closed this quarter?</button>
-                        <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show me opportunities that have not moved stages in the last 30 days">Show stale pipeline deals</button>
+                        <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show me my order bookings for last month">My bookings last month</button>
+                        <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show me my open pipeline deals">My open pipeline</button>
+                        <button class="suggestion-chip" onclick={handleSuggestion} data-question="How many deals closed this quarter?">Deals closed this quarter</button>
                         <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show top 10 open opportunities by MRR amount">Top 10 deals by MRR</button>
                         <button class="suggestion-chip" onclick={handleSuggestion} data-question="How many open cases are escalated to Jira?">Open Jira-escalated cases</button>
                     </div>

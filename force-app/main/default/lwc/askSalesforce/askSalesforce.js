@@ -1,6 +1,7 @@
 import { LightningElement, api, track } from 'lwc';
 import { loadScript } from 'lightning/platformResourceLoader';
 import askQuestion from '@salesforce/apex/AiSalesAssistantController.askQuestion';
+import getCurrentUserInfo from '@salesforce/apex/AiSalesAssistantController.getCurrentUserInfo';
 import CHARTJS from '@salesforce/resourceUrl/ChartJsLib';
 
 export default class AskSalesforce extends LightningElement {
@@ -10,6 +11,7 @@ export default class AskSalesforce extends LightningElement {
     @track messages = [];
     @track userInput = '';
     @track isLoading = false;
+    @track currentUserFirstName = '';
 
     messageIdCounter = 0;
     conversationHistory = [];
@@ -19,6 +21,14 @@ export default class AskSalesforce extends LightningElement {
 
     get showWelcome() {
         return this.messages.length === 0 && !this.isLoading;
+    }
+
+    get welcomeGreeting() {
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+        return this.currentUserFirstName
+            ? `${greeting}, ${this.currentUserFirstName}! 👋`
+            : `${greeting}! 👋`;
     }
 
     get isSendDisabled() {
@@ -47,6 +57,17 @@ export default class AskSalesforce extends LightningElement {
                     console.error('Failed to load Chart.js:', error);
                 });
         }
+        // Fetch logged-in user info for personalized greeting
+        getCurrentUserInfo()
+            .then(result => {
+                if (result && result.userName) {
+                    // Extract first name from full name (e.g. "Sumeet Lamba" → "Sumeet")
+                    this.currentUserFirstName = result.userName.split(' ')[0];
+                }
+            })
+            .catch(error => {
+                console.error('Failed to fetch user info:', error);
+            });
     }
 
     renderedCallback() {

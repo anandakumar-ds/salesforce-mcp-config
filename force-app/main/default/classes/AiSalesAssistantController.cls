@@ -180,13 +180,13 @@ public with sharing class AiSalesAssistantController {
      */
     private static String handleConversationalFollowup(String question, String conversationContext) {
         String systemPrompt =
-            'You are a helpful CRM data assistant called "Ask Salesforce".\n' +
-            'The user asked a conversational follow-up (not a data question).\n' +
-            'Answer based on the conversation history below. Be concise.\n' +
+            'You are Ask Salesforce — a friendly, knowledgeable business assistant at Exotel.\n' +
+            'The user is asking a conversational follow-up (no new data query needed).\n' +
+            'Answer warmly and concisely using the conversation history. Keep it natural and helpful.\n' +
             'Indian FY runs Apr-Mar. FY2026 = Apr 2025 - Mar 2026. Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar.\n' +
             'Revenue data is from accounts_revenue__c. Bookings from Opportunity.\n' +
-            'Do NOT generate SOQL queries. Just answer conversationally.\n' +
-            'If you cannot answer from context, say: "I don\'t have enough context for that. Could you ask a data question?"';
+            'Do NOT generate SOQL queries. Just respond conversationally like a helpful colleague would.\n' +
+            'If you cannot answer from context, say: "I\'d need to run a fresh query for that — go ahead and ask!"';
 
         String ctx = conversationContext.length() > 4000
             ? '...' + conversationContext.substring(conversationContext.length() - 4000)
@@ -2121,10 +2121,16 @@ public with sharing class AiSalesAssistantController {
         '21. NOT LIKE syntax: WRONG: field NOT LIKE \'%x%\'. RIGHT: (NOT field LIKE \'%x%\'). The NOT goes BEFORE the field.\n' +
         '22. Aggregate aliases: WRONG: ORDER BY ticket_count. RIGHT: ORDER BY COUNT(Id). SOQL does NOT support aliases in ORDER BY.\n\n' +
         '=== PERSONAL vs ORG-WIDE QUERIES ===\n' +
+        'Every question includes a context block like: [Logged-in user: FULL NAME (Salesforce User ID: 005XXXX)]\n' +
         'If the user prompt contains first-person pronouns ("I", "me", "my", "mine", "for me"):\n' +
-        '  ADD an ownership filter: Owner.Name = \'[logged-in user name from context]\' or OwnerId = \'[userId]\'.\n' +
-        '  Example: "my deals" → WHERE OwnerId = :currentUserId\n' +
-        '  Example: "my pipeline" → add OwnerId filter to pipeline query.\n' +
+        '  Extract the Salesforce User ID from the context block and apply an ownership filter.\n' +
+        '  For Opportunity, Case, Lead, Event, Task → WHERE OwnerId = \'<userId from context>\'\n' +
+        '  For accounts_revenue__c → WHERE Account_Manager__c = \'<userId from context>\' (revenue owned by this AM)\n' +
+        '  Example: "my deals" → WHERE OwnerId = \'005XXXX\'\n' +
+        '  Example: "my order bookings last month" → WHERE OwnerId = \'005XXXX\' AND StageName IN (\'Order\', \'POC\') AND B_Deal_Date__c filter\n' +
+        '  Example: "my pipeline" → WHERE OwnerId = \'005XXXX\' AND StageName IN (open funnel stages)\n' +
+        '  Example: "my revenue" → WHERE Account_Manager__c = \'005XXXX\' on accounts_revenue__c\n' +
+        '  IMPORTANT: Use the exact ID string from context — do NOT use :currentUserId bind variable.\n' +
         'Otherwise, return ORG-WIDE data by default. Do NOT apply ownership filters for general questions.\n\n' +
         '=== GRANULARITY MANDATE ===\n' +
         'For simple total questions ("total pipeline", "total revenue"), include ONE dimensional breakdown:\n' +
@@ -2150,9 +2156,11 @@ public with sharing class AiSalesAssistantController {
         'If the user wants a different breakdown, suggest a follow-up question — NEVER fabricate it.';
 
     private static final String SUMMARY_SYSTEM_PROMPT =
-        'You are a senior business analyst at Exotel. Think like a VP of Sales reviewing data — don\'t just restate numbers, ANALYZE them.\n\n' +
+        'You are Ask Salesforce — a smart, friendly business assistant at Exotel. You\'re like a knowledgeable colleague who happens to know all the numbers.\n' +
+        'Your tone is warm, clear, and professional — like a trusted analyst, not a robot.\n' +
+        'For personal queries ("my deals", "my pipeline"), address the user directly (e.g., "Here\'s your pipeline..."). For org-wide queries, use third-person.\n\n' +
         'HOW TO ANSWER:\n' +
-        '- Lead with the key insight or headline finding, not a data dump.\n' +
+        '- Lead with the key insight or headline finding — make it easy to scan.\n' +
         '- Group and categorize data (by region, loss reason, owner, segment, etc.) to reveal patterns.\n' +
         '- Identify what stands out: concentrations, outliers, concerning trends, or bright spots.\n' +
         '- End with a clear "Key Takeaway" or "Action Items" section with specific, actionable recommendations.\n' +
@@ -2268,6 +2276,17 @@ public with sharing class AiSalesAssistantController {
         '- Always include the text summary BEFORE the chartConfig block.\n' +
         '- Place the chartConfig block as the very LAST thing in your response.';
 
+    /**
+     * Returns the logged-in user's name and ID for the LWC greeting and context.
+     */
+    @AuraEnabled(cacheable=true)
+    public static Map<String, String> getCurrentUserInfo() {
+        return new Map<String, String>{
+            'userId'   => UserInfo.getUserId(),
+            'userName' => UserInfo.getName()
+        };
+    }
+
     @AuraEnabled
     public static AssistantResponse askQuestion(String userQuestion, String conversationContext) {
         Long startTime = System.currentTimeMillis();
@@ -2295,11 +2314,14 @@ public with sharing class AiSalesAssistantController {
                 return resp;
             }
 
-            // Inject today's date so the LLM can determine the current FY/quarter
+            // Inject today's date and logged-in user context so Claude can handle personal queries accurately
             Date today = Date.today();
             Integer fyStartYear = today.month() >= 4 ? today.year() : today.year() - 1;
+            String userFullName = UserInfo.getName();
+            String currentUserId = UserInfo.getUserId();
             String dateContext = '\n[Today is ' + String.valueOf(today) +
-                '. Current FY started ' + fyStartYear + '-04-01.]';
+                '. Current FY started ' + fyStartYear + '-04-01.' +
+                ' Logged-in user: ' + userFullName + ' (Salesforce User ID: ' + currentUserId + ').]';
             String enrichedQuestion = userQuestion + dateContext;
 
             // Step -1: KPI deterministic engine (no Claude for query generation)
