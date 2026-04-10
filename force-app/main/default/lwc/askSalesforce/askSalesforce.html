@@ -18,6 +18,9 @@
                     <h2 class="welcome-title">{welcomeGreeting}</h2>
                     <p class="welcome-text">I&apos;m your Salesforce assistant — ask me anything about your pipeline, bookings, revenue, leads, or cases, and I&apos;ll fetch the data and break it down for you.</p>
                     <div class="suggested-questions">
+                        <template lwc:if={showMyDayChip}>
+                            <button class="suggestion-chip my-day-chip" onclick={handleMyDay}>⚡ My Day</button>
+                        </template>
                         <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show me my order bookings for last month">My bookings last month</button>
                         <button class="suggestion-chip" onclick={handleSuggestion} data-question="Show me my open pipeline deals">My open pipeline</button>
                         <button class="suggestion-chip" onclick={handleSuggestion} data-question="How many deals closed this quarter?">Deals closed this quarter</button>

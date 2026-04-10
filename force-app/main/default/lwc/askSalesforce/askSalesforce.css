@@ -93,6 +93,23 @@
     border-color: #0176d3;
 }
 
+/* ===== My Day Chip (distinct from regular suggestion chips) ===== */
+.my-day-chip {
+    background: linear-gradient(135deg, #0176d3 0%, #7526c3 100%);
+    color: white !important;
+    border: none;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 6px rgba(1, 118, 211, 0.35);
+}
+.my-day-chip:hover {
+    background: linear-gradient(135deg, #014486 0%, #5a1d99 100%);
+    color: white !important;
+    border: none;
+    box-shadow: 0 3px 10px rgba(1, 118, 211, 0.45);
+    transform: translateY(-1px);
+}
+
 /* ===== Message Layout ===== */
 .message-row {
     display: flex;

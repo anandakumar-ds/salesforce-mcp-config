@@ -2287,6 +2287,634 @@ public with sharing class AiSalesAssistantController {
         };
     }
 
+    // ── My Day Daily Brief ──────────────────────────────────────────────
+
+    private static final Set<String> AD_PROFILES = new Set<String>{
+        'Account Manager Domestic', 'Account Manager International'
+    };
+    private static final Set<String> CX_PROFILES = new Set<String>{
+        'CSM Profile'
+    };
+
+    private static final Set<String> OPEN_OPP_STAGES = new Set<String>{
+        'Prospect', 'Approach', 'Proposal', 'Negotiation',
+        'SDF Submission', 'On Hold', 'Closed won - Pending'
+    };
+
+    private static final String MY_DAY_AD_PROMPT =
+        'You are Ask Salesforce generating a "My Day" daily brief for an Account Manager (AD).\n' +
+        'Be warm, direct, and actionable — like a smart colleague giving a morning briefing.\n' +
+        'Address the user by their first name.\n\n' +
+        'FORMAT (skip sections with no data — don\'t say "nothing here"):\n\n' +
+        '## \uD83D\uDD14 New Opps to Review\n' +
+        'Opportunities from Inside Sales sitting in Suspect stage. You need to accept or reject these.\n' +
+        'Show count + total value. List top 3-5 by value.\n\n' +
+        '## \uD83D\uDD25 Today\'s Actions\n' +
+        'Overdue tasks + today\'s tasks + meetings scheduled today. Be specific with names and times.\n\n' +
+        '## \uD83D\uDCB0 Deals That Need a Push\n' +
+        'Past close date (still open) and stale deals (>30 days no stage movement).\n' +
+        'Table: Deal | Account | Value | Issue. Show top 5-7 by value.\n\n' +
+        '## \uD83C\uDFAF Closing This Month\n' +
+        'Open deals expected to close this month — your immediate revenue opportunity.\n\n' +
+        '## \uD83D\uDCCA Your Pulse\n' +
+        'Bookings MTD | Open Pipeline | Win Rate (this Q) | Meetings this week.\n' +
+        'One line per metric. Add brief context where useful.\n\n' +
+        '## \uD83E\uDDF9 Quick Data Fixes\n' +
+        'Deals missing critical fields. Group counts by field: "X deals missing SKU, Y missing Deal Type".\n' +
+        'These are 2-minute fixes that improve reporting accuracy.\n\n' +
+        '## \uD83D\uDCA1 Insight\n' +
+        'One actionable insight from the data patterns. Name specific deals or accounts.\n\n' +
+        'RULES:\n' +
+        '- Keep total under 450 words.\n' +
+        '- Currency: ₹ Lakhs (L). 1L = ₹1,00,000. Use Crores for very large totals.\n' +
+        '- Tables for deal lists, bullets for actions.\n' +
+        '- If a section has zero items, skip it entirely.\n' +
+        '- Don\'t fabricate data. Only use what\'s provided.\n' +
+        '- Be encouraging but honest about what needs attention.';
+
+    private static final String MY_DAY_CX_PROMPT =
+        'You are Ask Salesforce generating a "My Day" daily brief for a Customer Success Manager (CSM).\n' +
+        'Be warm, direct, and actionable — like a smart colleague giving a morning briefing.\n' +
+        'Address the user by their first name.\n\n' +
+        'FORMAT (skip sections with no data — don\'t say "nothing here"):\n\n' +
+        '## \uD83D\uDD34 Accounts at Risk\n' +
+        'RED/AMBER RAG accounts and accounts with churn flags. These need immediate attention.\n' +
+        'Table: Account | RAG | Health | Issue.\n\n' +
+        '## \uD83C\uDFAB Critical Tickets\n' +
+        'Open Critical/Major support tickets on your accounts.\n' +
+        'Table: Ticket# | Account | Priority | Age | SLA Status.\n\n' +
+        '## \uD83D\uDCC5 QBRs Due This Quarter\n' +
+        'Accounts that haven\'t had a completed QBR (with document uploaded) this quarter.\n' +
+        'These are engagement gaps — list them.\n\n' +
+        '## \uD83D\uDCB0 Revenue Pulse\n' +
+        'Revenue MTD, GP MTD, GP Margin. Highlight notable changes.\n\n' +
+        '## \u26A0\uFE0F Declining Accounts\n' +
+        'Accounts where current quarter revenue is significantly below prior quarter.\n' +
+        'Table: Account | Current Q | Prior Q | Change%.\n' +
+        'Note: Current quarter may be partial — call this out.\n\n' +
+        '## \uD83E\uDDF9 Quick Fixes\n' +
+        'Accounts missing RAG status or with no activity in 60+ days.\n\n' +
+        '## \uD83D\uDCA1 Insight\n' +
+        'One actionable insight. Name specific accounts or patterns.\n\n' +
+        'RULES:\n' +
+        '- Keep total under 450 words.\n' +
+        '- Currency: ₹ Lakhs (L). 1L = ₹1,00,000.\n' +
+        '- Tables for account/ticket lists, bullets for actions.\n' +
+        '- If a section has zero items, skip it entirely.\n' +
+        '- Don\'t fabricate data. Only use what\'s provided.\n' +
+        '- Be encouraging but honest about what needs attention.';
+
+    /**
+     * Checks if the current user should see the My Day chip.
+     * Only AD and CSM profiles are eligible.
+     */
+    @AuraEnabled(cacheable=true)
+    public static Map<String, String> getMyDayEligibility() {
+        User u = [SELECT Profile.Name FROM User WHERE Id = :UserInfo.getUserId() LIMIT 1];
+        String profileName = u.Profile.Name;
+        String persona = null;
+        if (AD_PROFILES.contains(profileName)) {
+            persona = 'AD';
+        } else if (CX_PROFILES.contains(profileName)) {
+            persona = 'CX';
+        }
+        return new Map<String, String>{
+            'eligible' => persona != null ? 'true' : 'false',
+            'persona'  => persona != null ? persona : ''
+        };
+    }
+
+    /**
+     * Generates the My Day daily priority brief for the current user.
+     * Routes to AD or CSM brief based on profile.
+     */
+    @AuraEnabled
+    public static AssistantResponse getMyDayBrief() {
+        Long startTime = System.currentTimeMillis();
+        AssistantResponse resp = new AssistantResponse();
+
+        try {
+            User u = [SELECT Profile.Name, Name FROM User WHERE Id = :UserInfo.getUserId() LIMIT 1];
+            String profileName = u.Profile.Name;
+            String userName = u.Name;
+            String userId = UserInfo.getUserId();
+
+            String briefData;
+            String systemPrompt;
+
+            if (AD_PROFILES.contains(profileName)) {
+                briefData = buildAdBriefData(userId);
+                systemPrompt = MY_DAY_AD_PROMPT;
+            } else if (CX_PROFILES.contains(profileName)) {
+                briefData = buildCsmBriefData(userId);
+                systemPrompt = MY_DAY_CX_PROMPT;
+            } else {
+                resp.success = false;
+                resp.errorMessage = 'My Day brief is not available for your profile.';
+                resp.executionTimeMs = System.currentTimeMillis() - startTime;
+                return resp;
+            }
+
+            Date today = Date.today();
+            String dayOfWeek = DateTime.newInstance(today, Time.newInstance(0, 0, 0, 0)).format('EEEE');
+            String userMessage = 'User: ' + userName + '\nDate: ' + String.valueOf(today) +
+                ' (' + dayOfWeek + ')\n\nGenerate their daily brief from this data:\n\n' + briefData;
+
+            ClaudeApiService.ClaudeResponse summary =
+                ClaudeApiService.sendMessage(systemPrompt, userMessage, 8192);
+
+            resp.answer = summary.content;
+            resp.success = true;
+            resp.executionTimeMs = System.currentTimeMillis() - startTime;
+
+        } catch (Exception e) {
+            resp.success = false;
+            resp.errorMessage = 'Failed to generate your daily brief: ' + e.getMessage();
+            resp.executionTimeMs = System.currentTimeMillis() - startTime;
+        }
+
+        return resp;
+    }
+
+    /**
+     * Builds AD (Account Manager) daily brief data from targeted SOQLs.
+     */
+    private static String buildAdBriefData(String userId) {
+        Date today = Date.today();
+        Date thirtyDaysAgo = today.addDays(-30);
+        String data = '';
+
+        // Calculate Indian FY quarter dates
+        Integer m = today.month();
+        Date qStart;
+        if (m >= 4 && m <= 6) qStart = Date.newInstance(today.year(), 4, 1);
+        else if (m >= 7 && m <= 9) qStart = Date.newInstance(today.year(), 7, 1);
+        else if (m >= 10 && m <= 12) qStart = Date.newInstance(today.year(), 10, 1);
+        else qStart = Date.newInstance(today.year(), 1, 1);
+
+        // ── Query 1: All active opportunities (partitioned in Apex) ──
+        List<Opportunity> myOpps = [
+            SELECT Id, Name, Account.Name, StageName, CloseDate,
+                   Normalize_Amount_INR__c, Net_New_INR__c, LastStageChangeDate,
+                   SKU__c, Classification_Type__c, Deal_Type__c, Deal_Category__c,
+                   Next_Step_Date__c, B_Deal_Date__c, Opportunity_Line_Item_Count__c,
+                   CreatedDate, LeadSource, ISQL_Stage__c
+            FROM Opportunity
+            WHERE OwnerId = :userId
+            AND StageName NOT IN ('Closed Lost', 'Closed-No decision', 'Closed Unknown',
+                                  'Closed Duplicate', 'Rejected', 'SDF Rejected', 'POC Closed')
+            ORDER BY Normalize_Amount_INR__c DESC NULLS LAST
+            LIMIT 200
+        ];
+
+        // Partition opportunities into sections
+        List<Map<String, Object>> suspectOpps = new List<Map<String, Object>>();
+        List<Map<String, Object>> pastCloseDate = new List<Map<String, Object>>();
+        List<Map<String, Object>> staleDeals = new List<Map<String, Object>>();
+        List<Map<String, Object>> closingThisMonth = new List<Map<String, Object>>();
+        Decimal totalPipeline = 0;
+        Integer totalOpenDeals = 0;
+        // Data hygiene counters
+        Map<String, Integer> missingFieldCounts = new Map<String, Integer>();
+        List<Map<String, Object>> dataIssueExamples = new List<Map<String, Object>>();
+
+        Set<String> wonStages = new Set<String>{ 'Order', 'POC' };
+
+        for (Opportunity opp : myOpps) {
+            String acctName = opp.Account != null ? opp.Account.Name : '(No Account)';
+            Decimal val = opp.Normalize_Amount_INR__c != null ? opp.Normalize_Amount_INR__c : 0;
+            String valDisplay = formatMyDayLakhs(val);
+
+            // Suspect — from Inside Sales, needs acceptance
+            if (opp.StageName == 'Suspect') {
+                suspectOpps.add(new Map<String, Object>{
+                    'Name' => opp.Name, 'Account' => acctName, 'Value' => valDisplay,
+                    'Created' => opp.CreatedDate != null ? String.valueOf(opp.CreatedDate.date()) : '',
+                    'Source' => opp.LeadSource
+                });
+            }
+
+            // Open pipeline analysis
+            if (OPEN_OPP_STAGES.contains(opp.StageName)) {
+                totalPipeline += val;
+                totalOpenDeals++;
+
+                if (opp.CloseDate != null && opp.CloseDate < today) {
+                    pastCloseDate.add(new Map<String, Object>{
+                        'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
+                        'Value' => valDisplay, 'CloseDate' => String.valueOf(opp.CloseDate),
+                        'DaysOverdue' => opp.CloseDate.daysBetween(today)
+                    });
+                }
+
+                if (opp.LastStageChangeDate != null && opp.LastStageChangeDate.date() < thirtyDaysAgo) {
+                    staleDeals.add(new Map<String, Object>{
+                        'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
+                        'Value' => valDisplay,
+                        'DaysStale' => opp.LastStageChangeDate.date().daysBetween(today)
+                    });
+                }
+
+                if (opp.CloseDate != null && opp.CloseDate.month() == today.month() &&
+                    opp.CloseDate.year() == today.year()) {
+                    closingThisMonth.add(new Map<String, Object>{
+                        'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
+                        'Value' => valDisplay, 'CloseDate' => String.valueOf(opp.CloseDate)
+                    });
+                }
+            }
+
+            // Data hygiene checks
+            List<String> missing = new List<String>();
+            if (opp.SKU__c == null) missing.add('SKU');
+            if (opp.Classification_Type__c == null) missing.add('Classification Type');
+            if (opp.Deal_Type__c == null) missing.add('Deal Type');
+            if (opp.Deal_Category__c == null) missing.add('Deal Category');
+            if (OPEN_OPP_STAGES.contains(opp.StageName) && opp.Next_Step_Date__c == null) missing.add('Next Step Date');
+            if (wonStages.contains(opp.StageName) && opp.B_Deal_Date__c == null) missing.add('B Deal Date');
+            if (opp.Opportunity_Line_Item_Count__c == null || opp.Opportunity_Line_Item_Count__c == 0) missing.add('Products');
+
+            if (!missing.isEmpty()) {
+                for (String field : missing) {
+                    missingFieldCounts.put(field, (missingFieldCounts.containsKey(field) ? missingFieldCounts.get(field) : 0) + 1);
+                }
+                if (dataIssueExamples.size() < 5) {
+                    dataIssueExamples.add(new Map<String, Object>{
+                        'Name' => opp.Name, 'Stage' => opp.StageName, 'Missing' => String.join(missing, ', ')
+                    });
+                }
+            }
+        }
+
+        // ── Section: Suspect Opps ──
+        data += '=== SUSPECT OPPORTUNITIES (Awaiting ISQL Acceptance) ===\n';
+        data += 'Total: ' + suspectOpps.size() + ' deals\n';
+        if (!suspectOpps.isEmpty()) {
+            Integer lim = Math.min(suspectOpps.size(), 10);
+            data += JSON.serialize(suspectOpps.subList(0, lim)) + '\n';
+        }
+        data += '\n';
+
+        // ── Query 2: Overdue & today's tasks ──
+        List<Task> myTasks = [
+            SELECT Subject, ActivityDate, Status, What.Name
+            FROM Task
+            WHERE OwnerId = :userId AND Status != 'Completed' AND ActivityDate <= TODAY
+            ORDER BY ActivityDate ASC
+            LIMIT 15
+        ];
+        data += '=== OVERDUE & TODAY\'S TASKS ===\n';
+        data += 'Count: ' + myTasks.size() + '\n';
+        for (Task t : myTasks) {
+            data += '- ' + (t.Subject != null ? t.Subject : '(No subject)') +
+                ' | Due: ' + String.valueOf(t.ActivityDate) +
+                ' | Related: ' + (t.What != null ? t.What.Name : '') + '\n';
+        }
+        data += '\n';
+
+        // ── Query 3: Today's events ──
+        List<Event> todayEvents = [
+            SELECT Subject, StartDateTime, EndDateTime, What.Name, Who.Name
+            FROM Event
+            WHERE OwnerId = :userId AND DAY_ONLY(StartDateTime) = TODAY
+            ORDER BY StartDateTime ASC
+            LIMIT 10
+        ];
+        data += '=== TODAY\'S MEETINGS ===\n';
+        data += 'Count: ' + todayEvents.size() + '\n';
+        for (Event ev : todayEvents) {
+            data += '- ' + (ev.Subject != null ? ev.Subject : '(No subject)') +
+                ' | Time: ' + (ev.StartDateTime != null ? ev.StartDateTime.format('HH:mm') : '') +
+                ' | With: ' + (ev.Who != null ? ev.Who.Name : '') +
+                ' | Re: ' + (ev.What != null ? ev.What.Name : '') + '\n';
+        }
+        data += '\n';
+
+        // ── Section: Deals needing attention ──
+        data += '=== DEALS PAST CLOSE DATE (Still Open) ===\n';
+        data += 'Count: ' + pastCloseDate.size() + '\n';
+        if (!pastCloseDate.isEmpty()) {
+            Integer lim = Math.min(pastCloseDate.size(), 10);
+            data += JSON.serialize(pastCloseDate.subList(0, lim)) + '\n';
+        }
+        data += '\n';
+
+        data += '=== STALE DEALS (No Stage Movement > 30 Days) ===\n';
+        data += 'Count: ' + staleDeals.size() + '\n';
+        if (!staleDeals.isEmpty()) {
+            Integer lim = Math.min(staleDeals.size(), 10);
+            data += JSON.serialize(staleDeals.subList(0, lim)) + '\n';
+        }
+        data += '\n';
+
+        data += '=== CLOSING THIS MONTH ===\n';
+        data += 'Count: ' + closingThisMonth.size() + '\n';
+        if (!closingThisMonth.isEmpty()) {
+            data += JSON.serialize(closingThisMonth) + '\n';
+        }
+        data += '\n';
+
+        // ── Query 4: Bookings MTD ──
+        AggregateResult[] bookingsMtd = [
+            SELECT SUM(Net_New_INR__c) rev, COUNT(Id) cnt
+            FROM Opportunity
+            WHERE OwnerId = :userId AND StageName IN ('Order', 'POC') AND B_Deal_Date__c = THIS_MONTH
+        ];
+        Decimal mtdBookings = bookingsMtd[0].get('rev') != null ? (Decimal) bookingsMtd[0].get('rev') : 0;
+        Integer mtdDeals = bookingsMtd[0].get('cnt') != null ? (Integer) bookingsMtd[0].get('cnt') : 0;
+
+        // ── Query 5: Won this quarter ──
+        AggregateResult[] wonThisQ = [
+            SELECT COUNT(Id) cnt, SUM(Net_New_INR__c) val
+            FROM Opportunity
+            WHERE OwnerId = :userId AND StageName IN ('Order', 'POC')
+            AND B_Deal_Date__c >= :qStart AND B_Deal_Date__c <= :today
+        ];
+        Integer wonCount = wonThisQ[0].get('cnt') != null ? (Integer) wonThisQ[0].get('cnt') : 0;
+        Decimal wonValue = wonThisQ[0].get('val') != null ? (Decimal) wonThisQ[0].get('val') : 0;
+
+        // ── Query 6: Lost this quarter ──
+        AggregateResult[] lostThisQ = [
+            SELECT COUNT(Id) cnt, SUM(Net_New_INR__c) val
+            FROM Opportunity
+            WHERE OwnerId = :userId AND StageName IN ('Closed Lost', 'Closed-No decision')
+            AND CloseDate >= :qStart AND CloseDate <= :today
+        ];
+        Integer lostCount = lostThisQ[0].get('cnt') != null ? (Integer) lostThisQ[0].get('cnt') : 0;
+        Decimal lostValue = lostThisQ[0].get('val') != null ? (Decimal) lostThisQ[0].get('val') : 0;
+
+        // ── Query 7: Meetings this week ──
+        Integer meetingsThisWeek = [
+            SELECT COUNT() FROM Event WHERE OwnerId = :userId AND StartDateTime = THIS_WEEK
+        ];
+
+        // ── Section: Pulse ──
+        data += '=== PERFORMANCE PULSE ===\n';
+        data += 'Bookings MTD: ' + formatMyDayLakhs(mtdBookings) + ' (' + mtdDeals + ' deals)\n';
+        data += 'Open Pipeline: ' + formatMyDayLakhs(totalPipeline) + ' (' + totalOpenDeals + ' deals)\n';
+        Integer totalDecided = wonCount + lostCount;
+        if (totalDecided > 0) {
+            Decimal winRateByCount = (Decimal) wonCount / totalDecided * 100;
+            data += 'Win Rate (This Q by count): ' + winRateByCount.setScale(1) + '% (' + wonCount + ' won / ' + totalDecided + ' decided)\n';
+            Decimal totalDecidedValue = wonValue + lostValue;
+            if (totalDecidedValue > 0) {
+                Decimal winRateByValue = wonValue / totalDecidedValue * 100;
+                data += 'Win Rate (This Q by value): ' + winRateByValue.setScale(1) + '% (' + formatMyDayLakhs(wonValue) + ' won / ' + formatMyDayLakhs(totalDecidedValue) + ' decided)\n';
+            }
+        } else {
+            data += 'Win Rate (This Q): No decided deals yet this quarter.\n';
+        }
+        data += 'Meetings This Week: ' + meetingsThisWeek + '\n\n';
+
+        // ── Section: Data Hygiene ──
+        data += '=== DATA HYGIENE ISSUES ===\n';
+        Integer totalIssues = 0;
+        for (Integer cnt : missingFieldCounts.values()) totalIssues += cnt;
+        data += 'Total field gaps: ' + totalIssues + '\n';
+        for (String field : missingFieldCounts.keySet()) {
+            data += '- Missing ' + field + ': ' + missingFieldCounts.get(field) + ' deals\n';
+        }
+        if (!dataIssueExamples.isEmpty()) {
+            data += 'Examples:\n' + JSON.serialize(dataIssueExamples) + '\n';
+        }
+
+        return data;
+    }
+
+    /**
+     * Builds CSM (Customer Success Manager) daily brief data from targeted SOQLs.
+     */
+    private static String buildCsmBriefData(String userId) {
+        Date today = Date.today();
+        String data = '';
+
+        // Calculate Indian FY quarter dates
+        Integer m = today.month();
+        Date quarterStart;
+        if (m >= 4 && m <= 6) quarterStart = Date.newInstance(today.year(), 4, 1);
+        else if (m >= 7 && m <= 9) quarterStart = Date.newInstance(today.year(), 7, 1);
+        else if (m >= 10 && m <= 12) quarterStart = Date.newInstance(today.year(), 10, 1);
+        else quarterStart = Date.newInstance(today.year(), 1, 1);
+
+        // Prior quarter dates
+        Date priorQStart, priorQEnd;
+        if (m >= 4 && m <= 6) { priorQStart = Date.newInstance(today.year(), 1, 1); priorQEnd = Date.newInstance(today.year(), 3, 31); }
+        else if (m >= 7 && m <= 9) { priorQStart = Date.newInstance(today.year(), 4, 1); priorQEnd = Date.newInstance(today.year(), 6, 30); }
+        else if (m >= 10 && m <= 12) { priorQStart = Date.newInstance(today.year(), 7, 1); priorQEnd = Date.newInstance(today.year(), 9, 30); }
+        else { priorQStart = Date.newInstance(today.year() - 1, 10, 1); priorQEnd = Date.newInstance(today.year() - 1, 12, 31); }
+
+        // ── Query 1: At-risk accounts ──
+        List<Account> atRiskAccounts = [
+            SELECT Id, Name, RAG__c, Customer_Health__c, Churned_Day__c, Owner.Name, Last_Revenue_Date__c
+            FROM Account
+            WHERE Account_CSM__c = :userId
+            AND (RAG__c IN ('RED', 'AMBER') OR Churned_Day__c > 0)
+            ORDER BY RAG__c ASC, Churned_Day__c DESC NULLS LAST
+            LIMIT 20
+        ];
+        data += '=== AT-RISK ACCOUNTS ===\n';
+        data += 'Count: ' + atRiskAccounts.size() + '\n';
+        for (Account a : atRiskAccounts) {
+            data += '- ' + a.Name + ' | RAG: ' + (a.RAG__c != null ? a.RAG__c : 'Not set') +
+                ' | Health: ' + (a.Customer_Health__c != null ? a.Customer_Health__c : 'N/A') +
+                ' | Churned Days: ' + (a.Churned_Day__c != null ? String.valueOf(a.Churned_Day__c.intValue()) : '0') +
+                ' | AD: ' + (a.Owner != null ? a.Owner.Name : '') + '\n';
+        }
+        data += '\n';
+
+        // ── Query 2: Open Critical/Major tickets ──
+        List<Case> criticalTickets = [
+            SELECT CaseNumber, Subject, Priority, Status, Age_in_min__c, SLA_Violated__c, Account.Name
+            FROM Case
+            WHERE Account.Account_CSM__c = :userId
+            AND Status IN ('New', 'Open', 'Note_added', 'Re-Open', 'Pending', 'In Progress')
+            AND Priority IN ('Critical', 'Major')
+            ORDER BY Priority ASC, Age_in_min__c DESC NULLS LAST
+            LIMIT 20
+        ];
+        data += '=== CRITICAL/MAJOR OPEN TICKETS ===\n';
+        data += 'Count: ' + criticalTickets.size() + '\n';
+        for (Case c : criticalTickets) {
+            String ageDisplay = c.Age_in_min__c != null ? String.valueOf((c.Age_in_min__c / 60).intValue()) + ' hrs' : 'N/A';
+            data += '- #' + c.CaseNumber + ' | ' + (c.Account != null ? c.Account.Name : '') +
+                ' | ' + c.Priority + ' | Age: ' + ageDisplay +
+                ' | SLA: ' + (c.SLA_Violated__c == true ? 'BREACHED' : 'OK') +
+                ' | ' + c.Status + '\n';
+        }
+        data += '\n';
+
+        // ── Query 3 & 4: QBR coverage this quarter ──
+        List<Account> csmAccounts = [
+            SELECT Id, Name FROM Account WHERE Account_CSM__c = :userId LIMIT 200
+        ];
+        Set<Id> csmAccountIds = new Set<Id>();
+        Map<Id, String> accountNames = new Map<Id, String>();
+        for (Account a : csmAccounts) {
+            csmAccountIds.add(a.Id);
+            accountNames.put(a.Id, a.Name);
+        }
+
+        Set<Id> accountsWithQbr = new Set<Id>();
+        if (!csmAccountIds.isEmpty()) {
+            List<Event> qbrEvents = [
+                SELECT Related_Account__c
+                FROM Event
+                WHERE Related_Account__c IN :csmAccountIds
+                AND Meeting_Category__c = 'QBR'
+                AND QBR_Document_Uploaded__c = true
+                AND StartDateTime >= :quarterStart
+                AND StartDateTime <= :today
+            ];
+            for (Event ev : qbrEvents) {
+                if (ev.Related_Account__c != null) {
+                    accountsWithQbr.add(ev.Related_Account__c);
+                }
+            }
+        }
+
+        List<String> accountsMissingQbr = new List<String>();
+        for (Id acctId : csmAccountIds) {
+            if (!accountsWithQbr.contains(acctId)) {
+                accountsMissingQbr.add(accountNames.get(acctId));
+            }
+        }
+
+        data += '=== QBR COVERAGE THIS QUARTER ===\n';
+        data += 'Quarter: ' + String.valueOf(quarterStart) + ' to ' + String.valueOf(today) + '\n';
+        data += 'Total accounts: ' + csmAccounts.size() + '\n';
+        data += 'Accounts with completed QBR: ' + accountsWithQbr.size() + '\n';
+        data += 'Accounts WITHOUT QBR this quarter: ' + accountsMissingQbr.size() + '\n';
+        if (!accountsMissingQbr.isEmpty()) {
+            Integer lim = Math.min(accountsMissingQbr.size(), 15);
+            for (Integer i = 0; i < lim; i++) {
+                data += '- ' + accountsMissingQbr[i] + '\n';
+            }
+            if (accountsMissingQbr.size() > 15) {
+                data += '... and ' + (accountsMissingQbr.size() - 15) + ' more\n';
+            }
+        }
+        data += '\n';
+
+        // ── Query 5: Revenue MTD ──
+        AggregateResult[] revMtd = [
+            SELECT SUM(Revenue_Booked_Amount__c) rev, SUM(GP__c) gp
+            FROM accounts_revenue__c
+            WHERE CSM__c = :userId AND Revenue_Booked_On__c = THIS_MONTH
+        ];
+        Decimal mtdRev = revMtd[0].get('rev') != null ? (Decimal) revMtd[0].get('rev') : 0;
+        Decimal mtdGp = revMtd[0].get('gp') != null ? (Decimal) revMtd[0].get('gp') : 0;
+
+        data += '=== REVENUE PULSE ===\n';
+        data += 'Revenue MTD: ' + formatMyDayLakhs(mtdRev) + '\n';
+        data += 'GP MTD: ' + formatMyDayLakhs(mtdGp) + '\n';
+        if (mtdRev > 0) {
+            data += 'GP Margin: ' + (mtdGp / mtdRev * 100).setScale(1) + '%\n';
+        }
+        data += '\n';
+
+        // ── Query 6 & 7: Revenue comparison (current Q vs prior Q) by account ──
+        Map<String, Decimal> currentQRevByAcct = new Map<String, Decimal>();
+        Map<String, Decimal> priorQRevByAcct = new Map<String, Decimal>();
+
+        AggregateResult[] currentQRev = [
+            SELECT Customer_Universal_Account__r.Name acctName, SUM(Revenue_Booked_Amount__c) rev
+            FROM accounts_revenue__c
+            WHERE CSM__c = :userId
+            AND Revenue_Booked_On__c >= :quarterStart AND Revenue_Booked_On__c <= :today
+            AND Customer_Universal_Account__c != null
+            GROUP BY Customer_Universal_Account__r.Name
+            ORDER BY SUM(Revenue_Booked_Amount__c) DESC
+            LIMIT 50
+        ];
+        for (AggregateResult ar : currentQRev) {
+            currentQRevByAcct.put((String) ar.get('acctName'), (Decimal) ar.get('rev'));
+        }
+
+        AggregateResult[] priorQRev = [
+            SELECT Customer_Universal_Account__r.Name acctName, SUM(Revenue_Booked_Amount__c) rev
+            FROM accounts_revenue__c
+            WHERE CSM__c = :userId
+            AND Revenue_Booked_On__c >= :priorQStart AND Revenue_Booked_On__c <= :priorQEnd
+            AND Customer_Universal_Account__c != null
+            GROUP BY Customer_Universal_Account__r.Name
+            ORDER BY SUM(Revenue_Booked_Amount__c) DESC
+            LIMIT 50
+        ];
+        for (AggregateResult ar : priorQRev) {
+            priorQRevByAcct.put((String) ar.get('acctName'), (Decimal) ar.get('rev'));
+        }
+
+        // Find declining accounts (>20% drop)
+        List<Map<String, Object>> declining = new List<Map<String, Object>>();
+        Set<String> allAcctNames = new Set<String>();
+        allAcctNames.addAll(currentQRevByAcct.keySet());
+        allAcctNames.addAll(priorQRevByAcct.keySet());
+
+        for (String acct : allAcctNames) {
+            Decimal currentRev = currentQRevByAcct.containsKey(acct) ? currentQRevByAcct.get(acct) : 0;
+            Decimal priorRev = priorQRevByAcct.containsKey(acct) ? priorQRevByAcct.get(acct) : 0;
+            if (priorRev > 0 && currentRev < priorRev * 0.8) {
+                Decimal changePct = ((currentRev - priorRev) / priorRev * 100).setScale(1);
+                declining.add(new Map<String, Object>{
+                    'Account' => acct,
+                    'CurrentQ' => formatMyDayLakhs(currentRev),
+                    'PriorQ'   => formatMyDayLakhs(priorRev),
+                    'Change'   => String.valueOf(changePct) + '%'
+                });
+            }
+        }
+
+        data += '=== ACCOUNT REVENUE COMPARISON (Current Q vs Prior Q) ===\n';
+        data += 'NOTE: Current quarter has only ' + quarterStart.daysBetween(today) + ' days of data vs full prior quarter.\n';
+        data += 'Accounts with >20% revenue decline: ' + declining.size() + '\n';
+        if (!declining.isEmpty()) {
+            Integer lim = Math.min(declining.size(), 10);
+            data += JSON.serialize(declining.subList(0, lim)) + '\n';
+        }
+        data += '\n';
+
+        // ── Query 8: Accounts missing RAG or no recent activity ──
+        Date sixtyDaysAgo = today.addDays(-60);
+        List<Account> hygieneAccounts = [
+            SELECT Name, RAG__c, Last_Activity__c
+            FROM Account
+            WHERE Account_CSM__c = :userId
+            AND (RAG__c = null OR Last_Activity__c < :sixtyDaysAgo OR Last_Activity__c = null)
+            LIMIT 20
+        ];
+        data += '=== DATA HYGIENE ===\n';
+        Integer missingRag = 0;
+        Integer noRecentActivity = 0;
+        for (Account a : hygieneAccounts) {
+            if (a.RAG__c == null) missingRag++;
+            if (a.Last_Activity__c == null || a.Last_Activity__c < sixtyDaysAgo) noRecentActivity++;
+        }
+        data += 'Accounts missing RAG: ' + missingRag + '\n';
+        data += 'Accounts with no activity in 60+ days: ' + noRecentActivity + '\n';
+        for (Account a : hygieneAccounts) {
+            List<String> issues = new List<String>();
+            if (a.RAG__c == null) issues.add('No RAG');
+            if (a.Last_Activity__c == null || a.Last_Activity__c < sixtyDaysAgo) issues.add('No recent activity');
+            data += '- ' + a.Name + ': ' + String.join(issues, ', ') + '\n';
+        }
+
+        return data;
+    }
+
+    /**
+     * Formats a decimal value into ₹ Lakhs or Crores for My Day brief data.
+     */
+    private static String formatMyDayLakhs(Decimal amount) {
+        if (amount == null) return '₹0';
+        if (Math.abs(amount) >= 10000000) {
+            return '₹' + (amount / 10000000).setScale(2) + ' Cr';
+        }
+        if (Math.abs(amount) >= 100000) {
+            return '₹' + (amount / 100000).setScale(2) + ' L';
+        }
+        return '₹' + amount.setScale(0).format();
+    }
+
     @AuraEnabled
     public static AssistantResponse askQuestion(String userQuestion, String conversationContext) {
         Long startTime = System.currentTimeMillis();

@@ -2,6 +2,8 @@ import { LightningElement, api, track } from 'lwc';
 import { loadScript } from 'lightning/platformResourceLoader';
 import askQuestion from '@salesforce/apex/AiSalesAssistantController.askQuestion';
 import getCurrentUserInfo from '@salesforce/apex/AiSalesAssistantController.getCurrentUserInfo';
+import getMyDayEligibility from '@salesforce/apex/AiSalesAssistantController.getMyDayEligibility';
+import getMyDayBrief from '@salesforce/apex/AiSalesAssistantController.getMyDayBrief';
 import CHARTJS from '@salesforce/resourceUrl/ChartJsLib';
 
 export default class AskSalesforce extends LightningElement {
@@ -12,6 +14,7 @@ export default class AskSalesforce extends LightningElement {
     @track userInput = '';
     @track isLoading = false;
     @track currentUserFirstName = '';
+    @track showMyDayChip = false;
 
     messageIdCounter = 0;
     conversationHistory = [];
@@ -68,6 +71,17 @@ export default class AskSalesforce extends LightningElement {
             .catch(error => {
                 console.error('Failed to fetch user info:', error);
             });
+
+        // Check if user is eligible for My Day briefing (AD/CSM profiles only)
+        getMyDayEligibility()
+            .then(result => {
+                if (result && result.eligible === 'true') {
+                    this.showMyDayChip = true;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to check My Day eligibility:', error);
+            });
     }
 
     renderedCallback() {
@@ -109,6 +123,34 @@ export default class AskSalesforce extends LightningElement {
         const question = event.currentTarget.dataset.question;
         this.userInput = question;
         this.handleSend();
+    }
+
+    handleMyDay() {
+        // Add user message
+        this.addUserMessage('⚡ My Day — Daily Priority Briefing');
+        this.isLoading = true;
+
+        getMyDayBrief()
+            .then(result => {
+                if (result.success) {
+                    this.addAssistantMessage(
+                        result.answer,
+                        result.soqlQuery,
+                        result.recordCount,
+                        result.executionTimeMs
+                    );
+                } else {
+                    this.addErrorMessage(result.errorMessage || 'Unable to generate your daily briefing. Please try again.');
+                }
+            })
+            .catch(error => {
+                const msg = error.body ? error.body.message : 'An unexpected error occurred generating your daily briefing.';
+                this.addErrorMessage(msg);
+            })
+            .finally(() => {
+                this.isLoading = false;
+                this.scrollToBottom();
+            });
     }
 
     handleSend() {
