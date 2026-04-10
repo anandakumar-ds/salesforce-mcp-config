@@ -2078,18 +2078,33 @@ private class AiSalesAssistantControllerTest {
     }
 
     @isTest
-    static void testFormatMyDayLakhs_Coverage() {
-        // formatMyDayLakhs is private, so we exercise it indirectly through
-        // buildAdBriefData / buildCsmBriefData via getMyDayBrief.
-        // This test ensures the brief generation path covers the formatting method.
+    static void testFormatMyDayLakhs_DirectCoverage() {
+        // formatMyDayLakhs is @TestVisible — test directly with various amounts
+        String result1 = AiSalesAssistantController.formatMyDayLakhs(0);
+        System.assertEquals('₹0', result1);
+
+        String result2 = AiSalesAssistantController.formatMyDayLakhs(500000);
+        System.assert(result2.contains('L'), 'Should format as Lakhs: ' + result2);
+
+        String result3 = AiSalesAssistantController.formatMyDayLakhs(15000000);
+        System.assert(result3.contains('Cr'), 'Should format as Crores: ' + result3);
+
+        String result4 = AiSalesAssistantController.formatMyDayLakhs(null);
+        System.assertEquals('₹0', result4);
+    }
+
+    @isTest
+    static void testBuildAdBriefData_DirectCoverage() {
+        // buildAdBriefData is @TestVisible — call directly with current user ID
+        // to exercise all 7 SOQL queries and formatting logic.
         setupTestConfig();
 
-        // Create test data that would generate revenue aggregates
-        Account testAcc = new Account(Name = 'My Day Test Account');
+        // Create test data
+        Account testAcc = new Account(Name = 'AD Brief Test Account');
         insert testAcc;
 
         Opportunity testOpp = new Opportunity(
-            Name = 'My Day Test Opp',
+            Name = 'AD Test Opp',
             AccountId = testAcc.Id,
             StageName = 'Prospect',
             CloseDate = Date.today().addDays(30),
@@ -2097,14 +2112,113 @@ private class AiSalesAssistantControllerTest {
         );
         insert testOpp;
 
-        Test.startTest();
-        Test.setMock(HttpCalloutMock.class, new MockClaudeMyDay());
+        // Create an overdue task
+        Task testTask = new Task(
+            Subject = 'Follow up',
+            ActivityDate = Date.today().addDays(-1),
+            Status = 'Not Started',
+            WhatId = testAcc.Id
+        );
+        insert testTask;
 
-        // This will invoke the brief builder which calls formatMyDayLakhs
-        AiSalesAssistantController.AssistantResponse resp =
-            AiSalesAssistantController.getMyDayBrief();
+        Test.startTest();
+        String briefData = AiSalesAssistantController.buildAdBriefData(UserInfo.getUserId());
         Test.stopTest();
 
-        System.assertNotEquals(null, resp);
+        System.assertNotEquals(null, briefData, 'Brief data should not be null');
+        System.assert(briefData.length() > 0, 'Brief data should not be empty');
+        System.assert(briefData.contains('OPEN PIPELINE'), 'Should contain pipeline section');
+        System.assert(briefData.contains('OVERDUE TASKS'), 'Should contain tasks section');
+    }
+
+    @isTest
+    static void testBuildCsmBriefData_DirectCoverage() {
+        // buildCsmBriefData is @TestVisible — call directly with current user ID
+        // to exercise all 8 SOQL queries and formatting logic.
+        setupTestConfig();
+
+        // Create test account assigned to current user as CSM
+        Account testAcc = new Account(
+            Name = 'CSM Brief Test Account',
+            Account_CSM__c = UserInfo.getUserId()
+        );
+        insert testAcc;
+
+        // Create a case for the account
+        Case testCase = new Case(
+            AccountId = testAcc.Id,
+            Subject = 'Test Critical Issue',
+            Status = 'New',
+            Priority = 'Critical'
+        );
+        insert testCase;
+
+        Test.startTest();
+        String briefData = AiSalesAssistantController.buildCsmBriefData(UserInfo.getUserId());
+        Test.stopTest();
+
+        System.assertNotEquals(null, briefData, 'Brief data should not be null');
+        System.assert(briefData.length() > 0, 'Brief data should not be empty');
+        System.assert(briefData.contains('AT-RISK ACCOUNTS') || briefData.contains('CRITICAL'),
+            'Should contain CSM-relevant sections');
+    }
+
+    @isTest
+    static void testBuildAdBriefData_WithWonOpps() {
+        // Test AD brief with won opportunities to cover booking MTD path
+        setupTestConfig();
+
+        Account testAcc = new Account(Name = 'AD Won Opp Account');
+        insert testAcc;
+
+        // Create a won opportunity with booking date in current month
+        Opportunity wonOpp = new Opportunity(
+            Name = 'Won Opp',
+            AccountId = testAcc.Id,
+            StageName = 'Order',
+            CloseDate = Date.today(),
+            B_Deal_Date__c = Date.today(),
+            Amount = 1000000
+        );
+        insert wonOpp;
+
+        // Create a stale prospect (no stage change > 30 days simulated by old close date)
+        Opportunity staleOpp = new Opportunity(
+            Name = 'Stale Prospect',
+            AccountId = testAcc.Id,
+            StageName = 'Approach',
+            CloseDate = Date.today().addDays(-60),
+            Amount = 200000
+        );
+        insert staleOpp;
+
+        Test.startTest();
+        String briefData = AiSalesAssistantController.buildAdBriefData(UserInfo.getUserId());
+        Test.stopTest();
+
+        System.assertNotEquals(null, briefData);
+        System.assert(briefData.contains('BOOKINGS MTD') || briefData.contains('CLOSING THIS MONTH'),
+            'Should contain booking/closing sections');
+    }
+
+    @isTest
+    static void testBuildCsmBriefData_WithRevenue() {
+        // Test CSM brief with revenue records
+        setupTestConfig();
+
+        Account testAcc = new Account(
+            Name = 'CSM Revenue Account',
+            Account_CSM__c = UserInfo.getUserId(),
+            RAG__c = 'RED'
+        );
+        insert testAcc;
+
+        Test.startTest();
+        String briefData = AiSalesAssistantController.buildCsmBriefData(UserInfo.getUserId());
+        Test.stopTest();
+
+        System.assertNotEquals(null, briefData);
+        System.assert(briefData.contains('ACCOUNT REVENUE') || briefData.contains('HYGIENE'),
+            'Should contain revenue or hygiene sections');
     }
 }

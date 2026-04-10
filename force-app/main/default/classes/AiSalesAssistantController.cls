@@ -2439,6 +2439,7 @@ public with sharing class AiSalesAssistantController {
     /**
      * Builds AD (Account Manager) daily brief data from targeted SOQLs.
      */
+    @TestVisible
     private static String buildAdBriefData(String userId) {
         Date today = Date.today();
         Date thirtyDaysAgo = today.addDays(-30);
@@ -2687,6 +2688,7 @@ public with sharing class AiSalesAssistantController {
     /**
      * Builds CSM (Customer Success Manager) daily brief data from targeted SOQLs.
      */
+    @TestVisible
     private static String buildCsmBriefData(String userId) {
         Date today = Date.today();
         String data = '';
@@ -2908,6 +2910,7 @@ public with sharing class AiSalesAssistantController {
     /**
      * Formats a decimal value into ₹ Lakhs or Crores for My Day brief data.
      */
+    @TestVisible
     private static String formatMyDayLakhs(Decimal amount) {
         if (amount == null) return '₹0';
         if (Math.abs(amount) >= 10000000) {
