@@ -2093,7 +2093,7 @@ private class AiSalesAssistantControllerTest {
             AccountId = testAcc.Id,
             StageName = 'Prospect',
             CloseDate = Date.today().addDays(30),
-            Normalize_Amount_INR__c = 500000
+            Amount = 500000
         );
         insert testOpp;
 
