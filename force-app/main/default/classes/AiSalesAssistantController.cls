@@ -2550,8 +2550,9 @@ public with sharing class AiSalesAssistantController {
         data += '=== SUSPECT OPPORTUNITIES (Awaiting ISQL Acceptance) ===\n';
         data += 'Total: ' + suspectOpps.size() + ' deals\n';
         if (!suspectOpps.isEmpty()) {
-            Integer lim = Math.min(suspectOpps.size(), 10);
-            data += JSON.serialize(suspectOpps.subList(0, lim)) + '\n';
+            List<Map<String, Object>> slice = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(suspectOpps.size(), 10); i++) { slice.add(suspectOpps[i]); }
+            data += JSON.serialize(slice) + '\n';
         }
         data += '\n';
 
@@ -2594,16 +2595,18 @@ public with sharing class AiSalesAssistantController {
         data += '=== DEALS PAST CLOSE DATE (Still Open) ===\n';
         data += 'Count: ' + pastCloseDate.size() + '\n';
         if (!pastCloseDate.isEmpty()) {
-            Integer lim = Math.min(pastCloseDate.size(), 10);
-            data += JSON.serialize(pastCloseDate.subList(0, lim)) + '\n';
+            List<Map<String, Object>> slice2 = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(pastCloseDate.size(), 10); i++) { slice2.add(pastCloseDate[i]); }
+            data += JSON.serialize(slice2) + '\n';
         }
         data += '\n';
 
         data += '=== STALE DEALS (No Stage Movement > 30 Days) ===\n';
         data += 'Count: ' + staleDeals.size() + '\n';
         if (!staleDeals.isEmpty()) {
-            Integer lim = Math.min(staleDeals.size(), 10);
-            data += JSON.serialize(staleDeals.subList(0, lim)) + '\n';
+            List<Map<String, Object>> slice3 = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(staleDeals.size(), 10); i++) { slice3.add(staleDeals[i]); }
+            data += JSON.serialize(slice3) + '\n';
         }
         data += '\n';
 
@@ -2868,8 +2871,9 @@ public with sharing class AiSalesAssistantController {
         data += 'NOTE: Current quarter has only ' + quarterStart.daysBetween(today) + ' days of data vs full prior quarter.\n';
         data += 'Accounts with >20% revenue decline: ' + declining.size() + '\n';
         if (!declining.isEmpty()) {
-            Integer lim = Math.min(declining.size(), 10);
-            data += JSON.serialize(declining.subList(0, lim)) + '\n';
+            List<Map<String, Object>> slice4 = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(declining.size(), 10); i++) { slice4.add(declining[i]); }
+            data += JSON.serialize(slice4) + '\n';
         }
         data += '\n';
 
