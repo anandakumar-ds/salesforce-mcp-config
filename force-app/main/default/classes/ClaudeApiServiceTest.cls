@@ -111,6 +111,57 @@ private class ClaudeApiServiceTest {
     }
 
     @isTest
+    static void testSendMessage_WithModelOverride() {
+        setupTestConfig();
+        Test.setMock(HttpCalloutMock.class, new MockClaudeSuccess());
+        Test.startTest();
+        // Test the 4-param overload with explicit model override
+        ClaudeApiService.ClaudeResponse resp = ClaudeApiService.sendMessage(
+            'You are a SOQL expert.',
+            'Count all won deals',
+            1024,
+            'claude-haiku-4-5-20250414'
+        );
+        Test.stopTest();
+
+        System.assertNotEquals(null, resp, 'Response should not be null');
+        System.assertNotEquals(null, resp.content, 'Content should not be null');
+    }
+
+    @isTest
+    static void testSendConversation_WithModelOverride() {
+        setupTestConfig();
+        Test.setMock(HttpCalloutMock.class, new MockClaudeSuccess());
+
+        List<Map<String, String>> messages = new List<Map<String, String>>();
+        messages.add(new Map<String, String>{ 'role' => 'user', 'content' => 'Count deals' });
+
+        Test.startTest();
+        ClaudeApiService.ClaudeResponse resp = ClaudeApiService.sendConversation(
+            'Summarize data.',
+            messages,
+            2048,
+            'claude-haiku-4-5-20250414'
+        );
+        Test.stopTest();
+
+        System.assertNotEquals(null, resp, 'Response should not be null');
+    }
+
+    @isTest
+    static void testSendMessage_NullModelOverrideFallsToConfig() {
+        setupTestConfig();
+        Test.setMock(HttpCalloutMock.class, new MockClaudeSuccess());
+        Test.startTest();
+        // null override should fall back to config model
+        ClaudeApiService.ClaudeResponse resp = ClaudeApiService.sendMessage(
+            'Test', 'Test', 1024, null
+        );
+        Test.stopTest();
+        System.assertNotEquals(null, resp);
+    }
+
+    @isTest
     static void testSendMessage_NoConfig() {
         // Force null config — should throw config-not-found error
         ClaudeApiService.testConfig = null;

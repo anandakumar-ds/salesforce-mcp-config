@@ -4,6 +4,10 @@
  */
 public with sharing class AiSalesAssistantController {
 
+    // Fast model for SOQL generation (structured translation task).
+    // Summarization stays on the default model (Sonnet) from config for quality.
+    private static final String FAST_MODEL = 'claude-haiku-4-5-20250414';
+
     public class AssistantResponse {
         @AuraEnabled public String answer;
         @AuraEnabled public String soqlQuery;
@@ -470,7 +474,7 @@ public with sharing class AiSalesAssistantController {
         try {
             // Call Claude with the small planner prompt
             ClaudeApiService.ClaudeResponse planResponse =
-                ClaudeApiService.sendMessage(PLANNER_SYSTEM_PROMPT, enrichedQuestion, 2048);
+                ClaudeApiService.sendMessage(PLANNER_SYSTEM_PROMPT, enrichedQuestion, 2048, FAST_MODEL);
 
             // Parse JSON plan
             String planJson = planResponse.content.trim();
@@ -3205,9 +3209,11 @@ public with sharing class AiSalesAssistantController {
             }
 
             // Step 1: Fall back to full SOQL prompt if planner didn't handle it
+            // Uses FAST_MODEL — SOQL generation is a structured translation task.
+            // The 1,700-line prompt provides explicit rules; retry handles edge cases.
             if (queries == null) {
                 ClaudeApiService.ClaudeResponse soqlResponse =
-                    ClaudeApiService.sendMessage(SOQL_SYSTEM_PROMPT, enrichedQuestion, 8192);
+                    ClaudeApiService.sendMessage(SOQL_SYSTEM_PROMPT, enrichedQuestion, 8192, FAST_MODEL);
 
                 // Step 2: Extract ALL SOQL queries (supports 1-5 labeled queries)
                 queries = SoqlSanitizer.extractAllSoql(soqlResponse.content);
@@ -4026,7 +4032,7 @@ public with sharing class AiSalesAssistantController {
                             'Original request: ' + context + '\n' +
                             'Return ONLY the fixed SOQL in ```soql ``` code blocks.';
                         ClaudeApiService.ClaudeResponse fixResp =
-                            ClaudeApiService.sendMessage(SOQL_SYSTEM_PROMPT, fixPrompt, 8192);
+                            ClaudeApiService.sendMessage(SOQL_SYSTEM_PROMPT, fixPrompt, 8192, FAST_MODEL);
                         String fixedSoql = SoqlSanitizer.extractSoql(fixResp.content);
                         if (!SoqlSanitizer.isAllowedObject(fixedSoql)) {
                             break;

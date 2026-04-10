@@ -17,14 +17,32 @@ public class ClaudeApiService {
     public static ClaudeResponse sendMessage(String systemPrompt, String userMessage, Integer maxTokens) {
         List<Map<String, String>> messages = new List<Map<String, String>>();
         messages.add(new Map<String, String>{ 'role' => 'user', 'content' => userMessage });
-        return callClaudeApi(systemPrompt, messages, maxTokens);
+        return callClaudeApi(systemPrompt, messages, maxTokens, null);
+    }
+
+    /**
+     * Sends a single message with an explicit model override.
+     * Use this for tasks where a faster/cheaper model is sufficient (e.g., SOQL generation).
+     * Pass null for modelOverride to use the default model from config.
+     */
+    public static ClaudeResponse sendMessage(String systemPrompt, String userMessage, Integer maxTokens, String modelOverride) {
+        List<Map<String, String>> messages = new List<Map<String, String>>();
+        messages.add(new Map<String, String>{ 'role' => 'user', 'content' => userMessage });
+        return callClaudeApi(systemPrompt, messages, maxTokens, modelOverride);
     }
 
     /**
      * Sends a multi-turn conversation to Claude with a system prompt.
      */
     public static ClaudeResponse sendConversation(String systemPrompt, List<Map<String, String>> messages, Integer maxTokens) {
-        return callClaudeApi(systemPrompt, messages, maxTokens);
+        return callClaudeApi(systemPrompt, messages, maxTokens, null);
+    }
+
+    /**
+     * Sends a multi-turn conversation with an explicit model override.
+     */
+    public static ClaudeResponse sendConversation(String systemPrompt, List<Map<String, String>> messages, Integer maxTokens, String modelOverride) {
+        return callClaudeApi(systemPrompt, messages, maxTokens, modelOverride);
     }
 
     // Test-visible config override so tests don't depend on deployed Custom Metadata records
@@ -36,8 +54,9 @@ public class ClaudeApiService {
 
     /**
      * Core method: builds and sends the HTTP request to Claude API.
+     * @param modelOverride — if non-null, overrides the model from config. Use for fast-model routing.
      */
-    private static ClaudeResponse callClaudeApi(String systemPrompt, List<Map<String, String>> messages, Integer maxTokens) {
+    private static ClaudeResponse callClaudeApi(String systemPrompt, List<Map<String, String>> messages, Integer maxTokens, String modelOverride) {
         // Load config — use test override if available
         AI_Assistant_Config__mdt config;
         if (Test.isRunningTest() && testForceNullConfig) {
@@ -52,7 +71,10 @@ public class ClaudeApiService {
         }
 
         String apiKey = config.API_Key__c;
-        String modelName = config.Model_Name__c != null ? config.Model_Name__c : 'claude-sonnet-4-6';
+        // Model priority: explicit override > config value > default
+        String modelName = String.isNotBlank(modelOverride)
+            ? modelOverride
+            : (config.Model_Name__c != null ? config.Model_Name__c : 'claude-sonnet-4-6');
         String endpoint = 'https://api.anthropic.com/v1/messages';
 
         // Build messages array for the request
