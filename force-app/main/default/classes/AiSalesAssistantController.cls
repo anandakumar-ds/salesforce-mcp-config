@@ -2565,7 +2565,7 @@ public with sharing class AiSalesAssistantController {
                         'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
                         'Value' => valDisplay,
                         'DaysSinceStageChange' => daysSinceStage,
-                        'DaysSinceActivity' => daysSinceActivity > 0 ? daysSinceActivity : 'No activity recorded'
+                        'DaysSinceActivity' => daysSinceActivity > 0 ? String.valueOf(daysSinceActivity) : 'No activity recorded'
                     });
                 } else if (isStaleStage) {
                     // Stale Stage only (activity happened recently)
