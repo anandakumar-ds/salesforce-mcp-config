@@ -2097,7 +2097,7 @@ private class AiSalesAssistantControllerTest {
     static void testBuildAdBriefData_DirectCoverage() {
         // buildAdBriefData is @TestVisible — call directly with current user ID.
         // No DML for Opportunity (org flows cause SOQL limit issues).
-        // The method runs 7 SOQLs and returns a data string with section headers.
+        // The method now runs 8 SOQLs (added OpportunityFieldHistory for close date slips).
         setupTestConfig();
 
         Test.startTest();
@@ -2110,6 +2110,9 @@ private class AiSalesAssistantControllerTest {
         System.assert(briefData.contains('SUSPECT OPPORTUNITIES'), 'Should contain suspect section');
         System.assert(briefData.contains('OVERDUE'), 'Should contain overdue tasks section');
         System.assert(briefData.contains('PERFORMANCE PULSE'), 'Should contain pulse section');
+        // New sections from Tier 1 features
+        System.assert(briefData.contains('DEALS GONE DARK'), 'Should contain gone dark section');
+        System.assert(briefData.contains('CLOSE DATE SLIPPERS'), 'Should contain close date slippers section');
     }
 
     @isTest
@@ -2148,6 +2151,8 @@ private class AiSalesAssistantControllerTest {
         // Should still have section headers even with no data
         System.assert(briefData.contains('CLOSING THIS MONTH'), 'Should contain closing section');
         System.assert(briefData.contains('DATA HYGIENE'), 'Should contain hygiene section');
+        System.assert(briefData.contains('DEALS GONE DARK'), 'Should contain gone dark section');
+        System.assert(briefData.contains('CLOSE DATE SLIPPERS'), 'Should contain close date slippers section');
     }
 
     @isTest

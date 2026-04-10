@@ -2120,6 +2120,43 @@ public with sharing class AiSalesAssistantController {
         '20. Relationship queries max 5 levels. Owner.UserRole.Name is OK (3 levels). Deeper nesting will fail.\n' +
         '21. NOT LIKE syntax: WRONG: field NOT LIKE \'%x%\'. RIGHT: (NOT field LIKE \'%x%\'). The NOT goes BEFORE the field.\n' +
         '22. Aggregate aliases: WRONG: ORDER BY ticket_count. RIGHT: ORDER BY COUNT(Id). SOQL does NOT support aliases in ORDER BY.\n\n' +
+        '=== OPPORTUNITY FIELD HISTORY (Deal History / Change Tracking) ===\n' +
+        'When user asks about "history of", "changes to", "how many times did X change", "close date slips",\n' +
+        '"stage changes", "deal timeline", "field changes" for a specific opportunity:\n' +
+        '  Object: OpportunityFieldHistory\n' +
+        '  Key Fields: OpportunityId, Field, OldValue, NewValue, CreatedDate, CreatedById\n' +
+        '  Common tracked fields: StageName, CloseDate, Amount, OwnerId, Forecast_Category__c\n' +
+        '  PATTERN 1 — Full history of a specific deal:\n' +
+        '    SELECT Field, OldValue, NewValue, CreatedDate, CreatedBy.Name\n' +
+        '    FROM OpportunityFieldHistory\n' +
+        '    WHERE OpportunityId = \'<oppId>\'\n' +
+        '    ORDER BY CreatedDate ASC\n' +
+        '    LIMIT 200\n' +
+        '  PATTERN 2 — Close date changes (slip count) for a deal:\n' +
+        '    SELECT OldValue, NewValue, CreatedDate, CreatedBy.Name\n' +
+        '    FROM OpportunityFieldHistory\n' +
+        '    WHERE OpportunityId = \'<oppId>\' AND Field = \'CloseDate\'\n' +
+        '    ORDER BY CreatedDate ASC\n' +
+        '    LIMIT 50\n' +
+        '  PATTERN 3 — Stage changes for a deal:\n' +
+        '    SELECT OldValue, NewValue, CreatedDate, CreatedBy.Name\n' +
+        '    FROM OpportunityFieldHistory\n' +
+        '    WHERE OpportunityId = \'<oppId>\' AND Field = \'StageName\'\n' +
+        '    ORDER BY CreatedDate ASC\n' +
+        '    LIMIT 50\n' +
+        '  PATTERN 4 — Deals with many close date slips (across portfolio):\n' +
+        '    SELECT OpportunityId, Opportunity.Name, Opportunity.Account.Name, COUNT(Id) slipCount\n' +
+        '    FROM OpportunityFieldHistory\n' +
+        '    WHERE Field = \'CloseDate\' AND Opportunity.StageName IN (open funnel stages)\n' +
+        '    GROUP BY OpportunityId, Opportunity.Name, Opportunity.Account.Name\n' +
+        '    HAVING COUNT(Id) >= 3\n' +
+        '    ORDER BY COUNT(Id) DESC\n' +
+        '    LIMIT 50\n' +
+        '  NOTE: OpportunityFieldHistory only has records for fields with Field History Tracking enabled in Setup.\n' +
+        '  If no results, suggest: "Field history tracking may not be enabled for this field."\n' +
+        '  If user asks for "history of [deal name]", first find the Opportunity Id:\n' +
+        '    SELECT Id FROM Opportunity WHERE Name LIKE \'%deal name%\' LIMIT 1\n' +
+        '  Then use that Id in the history query. Return BOTH queries.\n\n' +
         '=== PERSONAL vs ORG-WIDE QUERIES ===\n' +
         'Every question includes a context block like: [Logged-in user: FULL NAME (Salesforce User ID: 005XXXX)]\n' +
         'If the user prompt contains first-person pronouns ("I", "me", "my", "mine", "for me"):\n' +
@@ -2312,8 +2349,12 @@ public with sharing class AiSalesAssistantController {
         '## \uD83D\uDD25 Today\'s Actions\n' +
         'Overdue tasks + today\'s tasks + meetings scheduled today. Be specific with names and times.\n\n' +
         '## \uD83D\uDCB0 Deals That Need a Push\n' +
-        'Past close date (still open) and stale deals (>30 days no stage movement).\n' +
-        'Table: Deal | Account | Value | Issue. Show top 5-7 by value.\n\n' +
+        'Past close date (still open), stale deals (>30 days no stage movement), and deals "gone dark" (no stage change AND no activity > 30 days).\n' +
+        'Gone Dark is the most severe — highlight these first with a \uD83D\uDEA8 flag.\n' +
+        'Table: Deal | Account | Value | Issue | Days. Show top 5-7 by value.\n\n' +
+        '## \u26A0\uFE0F Close Date Slippers\n' +
+        'Deals where the close date has been pushed 3 or more times — a red flag for forecasting accuracy.\n' +
+        'Table: Deal | Account | Value | Times Slipped. Emphasize deals with 5+ slips.\n\n' +
         '## \uD83C\uDFAF Closing This Month\n' +
         'Open deals expected to close this month — your immediate revenue opportunity.\n\n' +
         '## \uD83D\uDCCA Your Pulse\n' +
@@ -2459,7 +2500,7 @@ public with sharing class AiSalesAssistantController {
                    Normalize_Amount_INR__c, Net_New_INR__c, LastStageChangeDate,
                    SKU__c, Classification_Type__c, Deal_Type__c, Deal_Category__c,
                    Next_Step_Date__c, B_Deal_Date__c, Opportunity_Line_Item_Count__c,
-                   CreatedDate, LeadSource, ISQL_Stage__c
+                   CreatedDate, LeadSource, ISQL_Stage__c, Last_Activity_Date__c
             FROM Opportunity
             WHERE OwnerId = :userId
             AND StageName NOT IN ('Closed Lost', 'Closed-No decision', 'Closed Unknown',
@@ -2472,6 +2513,7 @@ public with sharing class AiSalesAssistantController {
         List<Map<String, Object>> suspectOpps = new List<Map<String, Object>>();
         List<Map<String, Object>> pastCloseDate = new List<Map<String, Object>>();
         List<Map<String, Object>> staleDeals = new List<Map<String, Object>>();
+        List<Map<String, Object>> goneDarkDeals = new List<Map<String, Object>>();
         List<Map<String, Object>> closingThisMonth = new List<Map<String, Object>>();
         Decimal totalPipeline = 0;
         Integer totalOpenDeals = 0;
@@ -2508,11 +2550,29 @@ public with sharing class AiSalesAssistantController {
                     });
                 }
 
-                if (opp.LastStageChangeDate != null && opp.LastStageChangeDate.date() < thirtyDaysAgo) {
+                // Stale stage: no stage movement > 30 days
+                Boolean isStaleStage = opp.LastStageChangeDate != null && opp.LastStageChangeDate.date() < thirtyDaysAgo;
+                // Stale activity: no activity > 30 days
+                Boolean isStaleActivity = opp.Last_Activity_Date__c == null ||
+                    opp.Last_Activity_Date__c < DateTime.newInstance(thirtyDaysAgo, Time.newInstance(0, 0, 0, 0));
+                Integer daysSinceStage = opp.LastStageChangeDate != null ? opp.LastStageChangeDate.date().daysBetween(today) : -1;
+                Integer daysSinceActivity = opp.Last_Activity_Date__c != null ?
+                    opp.Last_Activity_Date__c.date().daysBetween(today) : -1;
+
+                if (isStaleStage && isStaleActivity) {
+                    // Gone Dark: BOTH stage AND activity are stale — most severe
+                    goneDarkDeals.add(new Map<String, Object>{
+                        'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
+                        'Value' => valDisplay,
+                        'DaysSinceStageChange' => daysSinceStage,
+                        'DaysSinceActivity' => daysSinceActivity > 0 ? daysSinceActivity : 'No activity recorded'
+                    });
+                } else if (isStaleStage) {
+                    // Stale Stage only (activity happened recently)
                     staleDeals.add(new Map<String, Object>{
                         'Name' => opp.Name, 'Account' => acctName, 'Stage' => opp.StageName,
                         'Value' => valDisplay,
-                        'DaysStale' => opp.LastStageChangeDate.date().daysBetween(today)
+                        'DaysStale' => daysSinceStage
                     });
                 }
 
@@ -2602,12 +2662,21 @@ public with sharing class AiSalesAssistantController {
         }
         data += '\n';
 
-        data += '=== STALE DEALS (No Stage Movement > 30 Days) ===\n';
+        data += '=== STALE DEALS (No Stage Movement > 30 Days, but Recent Activity) ===\n';
         data += 'Count: ' + staleDeals.size() + '\n';
         if (!staleDeals.isEmpty()) {
             List<Map<String, Object>> slice3 = new List<Map<String, Object>>();
             for (Integer i = 0; i < Math.min(staleDeals.size(), 10); i++) { slice3.add(staleDeals[i]); }
             data += JSON.serialize(slice3) + '\n';
+        }
+        data += '\n';
+
+        data += '=== DEALS GONE DARK (No Stage Change + No Activity > 30 Days) ===\n';
+        data += 'Count: ' + goneDarkDeals.size() + '\n';
+        if (!goneDarkDeals.isEmpty()) {
+            List<Map<String, Object>> sliceGD = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(goneDarkDeals.size(), 10); i++) { sliceGD.add(goneDarkDeals[i]); }
+            data += JSON.serialize(sliceGD) + '\n';
         }
         data += '\n';
 
@@ -2618,7 +2687,63 @@ public with sharing class AiSalesAssistantController {
         }
         data += '\n';
 
-        // ── Query 4: Bookings MTD ──
+        // ── Query 4: Close Date Slip Detection (OpportunityFieldHistory) ──
+        // Collect open opp IDs for field history lookup
+        Set<Id> openOppIds = new Set<Id>();
+        for (Opportunity opp : myOpps) {
+            if (OPEN_OPP_STAGES.contains(opp.StageName)) {
+                openOppIds.add(opp.Id);
+            }
+        }
+        // Query close date changes — only if we have open opps
+        Map<Id, Integer> closeDateSlipCounts = new Map<Id, Integer>();
+        Map<Id, String> oppNameMap = new Map<Id, String>();
+        Map<Id, String> oppAcctMap = new Map<Id, String>();
+        Map<Id, String> oppValMap = new Map<Id, String>();
+        if (!openOppIds.isEmpty()) {
+            // Build name/account maps from existing data
+            for (Opportunity opp : myOpps) {
+                if (openOppIds.contains(opp.Id)) {
+                    oppNameMap.put(opp.Id, opp.Name);
+                    oppAcctMap.put(opp.Id, opp.Account != null ? opp.Account.Name : '(No Account)');
+                    oppValMap.put(opp.Id, formatMyDayLakhs(opp.Normalize_Amount_INR__c != null ? opp.Normalize_Amount_INR__c : 0));
+                }
+            }
+            List<OpportunityFieldHistory> closeDateChanges = [
+                SELECT OpportunityId
+                FROM OpportunityFieldHistory
+                WHERE OpportunityId IN :openOppIds AND Field = 'CloseDate'
+                ORDER BY OpportunityId, CreatedDate
+            ];
+            for (OpportunityFieldHistory fh : closeDateChanges) {
+                Id oid = fh.OpportunityId;
+                closeDateSlipCounts.put(oid, (closeDateSlipCounts.containsKey(oid) ? closeDateSlipCounts.get(oid) : 0) + 1);
+            }
+        }
+        // Build close date slippers section (3+ slips)
+        List<Map<String, Object>> closeDateSlippers = new List<Map<String, Object>>();
+        for (Id oid : closeDateSlipCounts.keySet()) {
+            Integer slips = closeDateSlipCounts.get(oid);
+            if (slips >= 3) {
+                closeDateSlippers.add(new Map<String, Object>{
+                    'Name' => oppNameMap.get(oid),
+                    'Account' => oppAcctMap.get(oid),
+                    'Value' => oppValMap.get(oid),
+                    'CloseDateChanges' => slips
+                });
+            }
+        }
+        // Sort by slip count descending (manual since List<Map> can't sort)
+        data += '=== CLOSE DATE SLIPPERS (3+ Close Date Changes) ===\n';
+        data += 'Count: ' + closeDateSlippers.size() + '\n';
+        if (!closeDateSlippers.isEmpty()) {
+            List<Map<String, Object>> sliceCDS = new List<Map<String, Object>>();
+            for (Integer i = 0; i < Math.min(closeDateSlippers.size(), 10); i++) { sliceCDS.add(closeDateSlippers[i]); }
+            data += JSON.serialize(sliceCDS) + '\n';
+        }
+        data += '\n';
+
+        // ── Query 5 (was 4): Bookings MTD ──
         AggregateResult[] bookingsMtd = [
             SELECT SUM(Net_New_INR__c) rev, COUNT(Id) cnt
             FROM Opportunity
@@ -2627,7 +2752,7 @@ public with sharing class AiSalesAssistantController {
         Decimal mtdBookings = bookingsMtd[0].get('rev') != null ? (Decimal) bookingsMtd[0].get('rev') : 0;
         Integer mtdDeals = bookingsMtd[0].get('cnt') != null ? (Integer) bookingsMtd[0].get('cnt') : 0;
 
-        // ── Query 5: Won this quarter ──
+        // ── Query 6 (was 5): Won this quarter ──
         AggregateResult[] wonThisQ = [
             SELECT COUNT(Id) cnt, SUM(Net_New_INR__c) val
             FROM Opportunity
@@ -2637,7 +2762,7 @@ public with sharing class AiSalesAssistantController {
         Integer wonCount = wonThisQ[0].get('cnt') != null ? (Integer) wonThisQ[0].get('cnt') : 0;
         Decimal wonValue = wonThisQ[0].get('val') != null ? (Decimal) wonThisQ[0].get('val') : 0;
 
-        // ── Query 6: Lost this quarter ──
+        // ── Query 7 (was 6): Lost this quarter ──
         AggregateResult[] lostThisQ = [
             SELECT COUNT(Id) cnt, SUM(Net_New_INR__c) val
             FROM Opportunity
@@ -2647,7 +2772,7 @@ public with sharing class AiSalesAssistantController {
         Integer lostCount = lostThisQ[0].get('cnt') != null ? (Integer) lostThisQ[0].get('cnt') : 0;
         Decimal lostValue = lostThisQ[0].get('val') != null ? (Decimal) lostThisQ[0].get('val') : 0;
 
-        // ── Query 7: Meetings this week ──
+        // ── Query 8 (was 7): Meetings this week ──
         Integer meetingsThisWeek = [
             SELECT COUNT() FROM Event WHERE OwnerId = :userId AND StartDateTime = THIS_WEEK
         ];
