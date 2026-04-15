@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_Revenue_Tier__c</fullName>
+    <label>Account Revenue Tier</label>
+    <description>Customer tier at time of Case creation. Stamped automatically by Case_RevenueTier_BeforeSave Flow. Immutable for the life of the Case — do not edit manually.</description>
+    <inlineHelpText>Customer support tier stamped at Case creation. Used for SLA tracking and routing.</inlineHelpText>
+    <type>Picklist</type>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <valueSet>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>HYPERCARE</fullName>
+                <default>false</default>
+                <label>HYPERCARE</label>
+            </value>
+            <value>
+                <fullName>STRATEGIC</fullName>
+                <default>false</default>
+                <label>STRATEGIC</label>
+            </value>
+            <value>
+                <fullName>PREMIUM</fullName>
+                <default>false</default>
+                <label>PREMIUM</label>
+            </value>
+            <value>
+                <fullName>STANDARD</fullName>
+                <default>false</default>
+                <label>STANDARD</label>
+            </value>
+            <value>
+                <fullName>UNKNOWN</fullName>
+                <default>true</default>
+                <label>UNKNOWN</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>

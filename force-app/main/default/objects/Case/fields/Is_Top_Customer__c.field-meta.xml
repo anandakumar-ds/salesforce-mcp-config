@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Is_Top_Customer__c</fullName>
+    <label>Top Customer</label>
+    <description>Mirror of Account.Top_Customer__c on the Case for use in list views and assignment rules.</description>
+    <type>Checkbox</type>
+    <defaultValue>false</defaultValue>
+    <externalId>false</externalId>
+    <trackHistory>false</trackHistory>
+</CustomField>

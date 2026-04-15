@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Tier__c</fullName>
+    <label>Tier</label>
+    <description>Support tier key — matches Account.Support_Tier__c and Case.Account_Revenue_Tier__c values.</description>
+    <type>Text</type>
+    <length>20</length>
+    <required>true</required>
+    <unique>true</unique>
+</CustomField>

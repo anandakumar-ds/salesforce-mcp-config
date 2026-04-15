@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Queue_Label__c</fullName>
+    <label>Queue Label</label>
+    <description>Human-readable queue label for documentation / debugging. Does not affect routing.</description>
+    <type>Text</type>
+    <length>120</length>
+    <required>false</required>
+    <unique>false</unique>
+</CustomField>

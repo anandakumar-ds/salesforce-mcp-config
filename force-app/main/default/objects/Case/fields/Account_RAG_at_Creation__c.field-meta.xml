@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_RAG_at_Creation__c</fullName>
+    <label>Account RAG at Creation</label>
+    <description>Snapshot of Account.RAG__c at the moment this Case was created. Preserved even if Account RAG changes later — important for SLA analysis.</description>
+    <inlineHelpText>Account health status (RED/AMBER/GREEN) captured at Case creation. Does not update if Account RAG changes.</inlineHelpText>
+    <type>Text</type>
+    <length>20</length>
+    <required>false</required>
+    <externalId>false</externalId>
+    <trackHistory>false</trackHistory>
+</CustomField>

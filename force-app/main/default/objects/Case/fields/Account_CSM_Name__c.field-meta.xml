@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_CSM_Name__c</fullName>
+    <label>Account CSM</label>
+    <description>CSM name stamped on the Case at creation. Visible to L1 agent without needing to click through to the Account. Does not auto-update if CSM changes later.</description>
+    <inlineHelpText>CSM assigned to the Account at the time this Case was created.</inlineHelpText>
+    <type>Text</type>
+    <length>120</length>
+    <required>false</required>
+    <externalId>false</externalId>
+</CustomField>

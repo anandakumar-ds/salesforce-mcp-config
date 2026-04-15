@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Support_Tier_Badge__c</fullName>
+    <label>Support Tier Badge</label>
+    <description>Visual tier badge with emoji prefix for UI display. Use this on Account highlights panel instead of raw Support_Tier__c.</description>
+    <type>Text</type>
+    <length>50</length>
+    <required>false</required>
+    <externalId>false</externalId>
+    <formula>CASE(Support_Tier__c,
+  &quot;HYPERCARE&quot;, &quot;🚨 HYPERCARE&quot;,
+  &quot;STRATEGIC&quot;, &quot;⭐ STRATEGIC&quot;,
+  &quot;PREMIUM&quot;,   &quot;🔷 PREMIUM&quot;,
+  &quot;STANDARD&quot;
+)</formula>
+    <formulaTreatBlanksAs>BlankAsZero</formulaTreatBlanksAs>
+</CustomField>

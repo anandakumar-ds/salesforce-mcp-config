@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_Revenue_Tier_Badge__c</fullName>
+    <label>Tier</label>
+    <description>Visual tier badge with emoji for compact layout display. Derived from Account_Revenue_Tier__c.</description>
+    <type>Text</type>
+    <length>60</length>
+    <required>false</required>
+    <externalId>false</externalId>
+    <formula>CASE(TEXT(Account_Revenue_Tier__c),
+  &quot;HYPERCARE&quot;, &quot;🚨 HYPERCARE&quot;,
+  &quot;STRATEGIC&quot;, &quot;⭐ STRATEGIC&quot;,
+  &quot;PREMIUM&quot;,   &quot;🔷 PREMIUM&quot;,
+  &quot;UNKNOWN&quot;,   &quot;❓ UNKNOWN&quot;,
+  &quot;STANDARD&quot;
+)</formula>
+    <formulaTreatBlanksAs>BlankAsZero</formulaTreatBlanksAs>
+</CustomField>

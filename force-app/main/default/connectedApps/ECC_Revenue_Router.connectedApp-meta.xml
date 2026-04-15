@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ConnectedApp xmlns="http://soap.sforce.com/2006/04/metadata">
+    <contactEmail>shivanand@exotel.com</contactEmail>
+    <description>Server-to-server integration for the ECC Revenue Router middleware. Used by Exotel IVR nodeflows and internal telephony services to look up Account revenue tier, RAG, CSM, and hypercare context by phone number for tier-based call routing and screen pop. OAuth 2.0 Client Credentials flow; pre-authorized for a dedicated integration user with read-only access to Account, Contact, and Case.</description>
+    <label>ECC Revenue Router</label>
+    <oauthConfig>
+        <callbackUrl>https://ameyo.my.salesforce.com/services/oauth2/callback</callbackUrl>
+        <isAdminApproved>true</isAdminApproved>
+        <scopes>Api</scopes>
+        <scopes>RefreshToken</scopes>
+    </oauthConfig>
+</ConnectedApp>

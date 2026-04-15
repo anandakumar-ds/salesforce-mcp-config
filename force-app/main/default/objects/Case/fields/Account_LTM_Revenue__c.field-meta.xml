@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Account_LTM_Revenue__c</fullName>
+    <label>Account LTM Revenue</label>
+    <description>Sum of Revenue_Booked_Amount__c on accounts_revenue__c for the last 12 months. Stamped at Case creation. Optional — only populated if LTM revenue rollup is built.</description>
+    <inlineHelpText>Last 12 months revenue booked for this account, stamped when Case was created.</inlineHelpText>
+    <type>Currency</type>
+    <precision>18</precision>
+    <scale>2</scale>
+    <required>false</required>
+    <externalId>false</externalId>
+</CustomField>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Support_Tier__c</fullName>
+    <label>Support Tier</label>
+    <description>Derived support tier based on commercial signals. Used for routing support calls (via IVR HTTP callout to middleware) and tickets (via Case Before-Save Flow). Priority order: HYPERCARE > STRATEGIC > PREMIUM > STANDARD. See docs/revenue-in-support/01-field-definitions-and-phone-audit.md</description>
+    <inlineHelpText>Customer tier used for support routing: HYPERCARE (active hypercare), STRATEGIC (top customer or SAAS premium), PREMIUM (SAAS enterprise + GREEN/AMBER), STANDARD (everything else). Derived automatically.</inlineHelpText>
+    <type>Text</type>
+    <length>50</length>
+    <required>false</required>
+    <externalId>false</externalId>
+    <formula>IF(
+  AND(TEXT(Hypercare_active__c) = &quot;Active&quot;, OR(ISBLANK(Hypercare_End_Date__c), Hypercare_End_Date__c &gt;= NOW())),
+  &quot;HYPERCARE&quot;,
+  IF(
+    OR(Top_Customer__c = TRUE, Is_SAAS_Premium_Account__c = TRUE),
+    &quot;STRATEGIC&quot;,
+    IF(
+      AND(SAAS_Enterprise_Account__c = TRUE, OR(TEXT(RAG__c) = &quot;GREEN&quot;, TEXT(RAG__c) = &quot;AMBER&quot;)),
+      &quot;PREMIUM&quot;,
+      &quot;STANDARD&quot;
+    )
+  )
+)</formula>
+    <formulaTreatBlanksAs>BlankAsZero</formulaTreatBlanksAs>
+    <trackHistory>true</trackHistory>
+</CustomField>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Queue_DeveloperName__c</fullName>
+    <label>Queue Developer Name</label>
+    <description>DeveloperName of the Salesforce Queue (Group where Type=Queue) to assign matching Cases to.</description>
+    <type>Text</type>
+    <length>80</length>
+    <required>true</required>
+    <unique>false</unique>
+</CustomField>
