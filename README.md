@@ -4,14 +4,14 @@ Ready-to-use Salesforce MCP (Model Context Protocol) configuration for AI coding
 
 ## Supported Tools
 
-| Tool | Config File | Auto-detected |
-|------|------------|---------------|
-| Claude Code | `.mcp.json` | Yes |
-| Claude Desktop | see [Claude Desktop Setup](#claude-desktop-setup) | Manual (one-time) |
-| OpenAI Codex CLI | `.codex/config.toml` | Yes |
-| VS Code (Copilot) | `.vscode/mcp.json` | Yes |
-| Cursor | `.mcp.json` | Yes |
-| Windsurf | `.mcp.json` | Yes |
+| Tool | Config File | Auto-detected | Loads `CLAUDE.md`? |
+|------|------------|---------------|---------------------|
+| Claude Code | `.mcp.json` | Yes | **Yes (full 1,100 lines)** |
+| Claude Desktop | see [Claude Desktop Setup](#claude-desktop-setup) | Manual (one-time) | No — paste [`EXOTEL_FIELD_GUIDE.md`](./EXOTEL_FIELD_GUIDE.md) into project instructions |
+| OpenAI Codex CLI | `.codex/config.toml` | Yes | Partial — paste [`EXOTEL_FIELD_GUIDE.md`](./EXOTEL_FIELD_GUIDE.md) for reliable answers |
+| VS Code (Copilot) | `.vscode/mcp.json` | Yes | No — paste [`EXOTEL_FIELD_GUIDE.md`](./EXOTEL_FIELD_GUIDE.md) into chat system prompt |
+| Cursor | `.mcp.json` | Yes | Yes (Cursor reads `CLAUDE.md` and `.cursorrules`) |
+| Windsurf | `.mcp.json` | Yes | Yes (Windsurf reads `CLAUDE.md`) |
 
 ## Quick Start (5 minutes)
 
@@ -116,6 +116,16 @@ Copy the output.
 > **Prerequisite:** You must have completed Step 1 and Step 2 above (SF CLI installed + authenticated) before Claude Desktop can connect.
 > **nvm / volta / fnm users:** The `echo $PATH` step is essential — your node binary lives in a version-specific directory that GUI apps can't discover on their own.
 
+**Step 3 (CRITICAL — prevents wrong-data answers):** Claude Desktop does NOT auto-load `CLAUDE.md` from this repo. Without the field mappings, the model guesses field names and gives wrong numbers (e.g. returns ₹129 Cr for FY26 revenue instead of the real ₹569 Cr, because it uses `Opportunity.Amount` with `IsWon=true` instead of `accounts_revenue__c.Revenue_Booked_Amount__c`).
+
+Fix: open [`EXOTEL_FIELD_GUIDE.md`](./EXOTEL_FIELD_GUIDE.md) in this repo, copy the whole file, paste it into Claude Desktop:
+
+> **Settings → Projects → \<your project\> → Project instructions**
+
+The guide is ~20k chars and covers 90% of real queries (revenue vs bookings split, pipeline stages, slang dictionary, key fields on Opportunity/Account/Case/Revenue, retention formulas, SOQL rules). Same applies to **ChatGPT, Cursor chat, Windsurf chat** — any tool that doesn't auto-load `CLAUDE.md`.
+
+**Tip:** If you can switch to **Claude Code** (CLI), you skip this step entirely — Claude Code auto-loads the full 1,100-line `CLAUDE.md`.
+
 ---
 
 ## Global Setup (Use Salesforce MCP in Any Project)
@@ -174,7 +184,7 @@ Once connected, ask questions in natural language:
 - "Which accounts are churned (Churned_Day > 0)?"
 - "Show me accounts in the BFSI sector"
 
-**Tip:** The `CLAUDE.md` file in this repo contains detailed field mappings for Revenue, Opportunity, Case, Account, and Lead objects. Your AI tool reads this automatically and builds correct SOQL queries.
+**Tip:** The `CLAUDE.md` file in this repo contains detailed field mappings (1,100+ lines) for Revenue, Opportunity, Case, Account, and Lead objects. **Claude Code / Cursor / Windsurf read this automatically** and build correct SOQL queries. **Claude Desktop, ChatGPT, and VS Code Copilot do NOT auto-load it** — paste [`EXOTEL_FIELD_GUIDE.md`](./EXOTEL_FIELD_GUIDE.md) (compact 20k-char version) into their project instructions instead.
 
 ---
 
