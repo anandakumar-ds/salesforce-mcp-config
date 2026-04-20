@@ -81,7 +81,15 @@ If you see Salesforce data, you're good to go.
 
 ## Claude Desktop Setup
 
-Claude Desktop requires manual MCP config. Add this to your Claude Desktop settings (`Settings > Developer > Edit Config`):
+Claude Desktop requires manual MCP config.
+
+**Step 1:** Get your shell PATH (Claude Desktop is a GUI app — it doesn't inherit your terminal's PATH, so `node`/`npx`/`sf` won't be found unless you pass it explicitly):
+```bash
+echo $PATH
+```
+Copy the output.
+
+**Step 2:** Add this to your Claude Desktop settings (`Settings > Developer > Edit Config`), replacing `<your-shell-PATH>` with the output from Step 1:
 
 ```json
 {
@@ -94,13 +102,19 @@ Claude Desktop requires manual MCP config. Add this to your Claude Desktop setti
         "--orgs", "ameyo",
         "--toolsets", "orgs,data,metadata,users",
         "--allow-non-ga-tools"
-      ]
+      ],
+      "env": {
+        "PATH": "<your-shell-PATH>",
+        "HOME": "/Users/<your-username>",
+        "NODE_NO_WARNINGS": "1"
+      }
     }
   }
 }
 ```
 
 > **Prerequisite:** You must have completed Step 1 and Step 2 above (SF CLI installed + authenticated) before Claude Desktop can connect.
+> **nvm / volta / fnm users:** The `echo $PATH` step is essential — your node binary lives in a version-specific directory that GUI apps can't discover on their own.
 
 ---
 
@@ -238,22 +252,40 @@ The first run downloads the MCP package via npx, which can be slow. Fix by insta
 ```bash
 npm install -g @salesforce/mcp
 ```
-Then you can also update `.mcp.json` to use the direct binary:
+Then you can also update your config to use the direct binary path (faster startup):
+```bash
+# Find the exact path
+which sf-mcp-server
+```
 ```json
 {
   "mcpServers": {
     "salesforce": {
       "type": "stdio",
-      "command": "sf-mcp-server",
+      "command": "<full-path-to-sf-mcp-server>",
       "args": [
         "--orgs", "ameyo",
         "--toolsets", "orgs,data,metadata,users",
         "--allow-non-ga-tools"
-      ]
+      ],
+      "env": {
+        "PATH": "<your-shell-PATH>",
+        "NODE_NO_WARNINGS": "1"
+      }
     }
   }
 }
 ```
+
+### "node: command not found" / "env: node: No such file or directory"
+Claude Desktop can't find `node` because it doesn't inherit your shell PATH. Common with **nvm**, **volta**, and **fnm** users.
+
+Fix: find where node lives and add it to your config's `env.PATH`:
+```bash
+dirname $(which node)
+# Example: /Users/you/.nvm/versions/node/v24.11.1/bin
+```
+Add that directory to the `"PATH"` value in your Claude Desktop config's `env` block. Or use the full `echo $PATH` approach from the Claude Desktop Setup section above.
 
 ### "Permission denied" or "INSUFFICIENT_ACCESS" errors
 Your Salesforce profile may not have API access or access to specific objects. Contact your Salesforce admin or Shivanand.
