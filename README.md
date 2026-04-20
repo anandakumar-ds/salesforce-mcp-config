@@ -88,11 +88,13 @@ Claude Desktop requires manual MCP config. Add this to your Claude Desktop setti
   "mcpServers": {
     "salesforce": {
       "command": "npx",
-      "args": ["-y", "@salesforcecli/mcp"],
-      "env": {
-        "SALESFORCE_MCP_ORGS": "ameyo",
-        "SALESFORCE_MCP_TOOLSETS": "orgs,data,metadata,users"
-      }
+      "args": [
+        "-y",
+        "@salesforce/mcp",
+        "--orgs", "ameyo",
+        "--toolsets", "orgs,data,metadata,users",
+        "--allow-non-ga-tools"
+      ]
     }
   }
 }
@@ -108,7 +110,7 @@ If you want the Salesforce MCP available everywhere (not just inside this repo),
 
 ```bash
 # Add to ~/.claude/settings.json (global, works in any directory)
-claude mcp add salesforce -g -- npx -y @salesforcecli/mcp
+claude mcp add salesforce -g -- npx -y @salesforce/mcp --orgs ameyo --toolsets orgs,data,metadata,users --allow-non-ga-tools
 ```
 
 Or manually add to `~/.claude/settings.json`:
@@ -118,11 +120,13 @@ Or manually add to `~/.claude/settings.json`:
     "salesforce": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@salesforcecli/mcp"],
-      "env": {
-        "SALESFORCE_MCP_ORGS": "ameyo",
-        "SALESFORCE_MCP_TOOLSETS": "orgs,data,metadata,users"
-      }
+      "args": [
+        "-y",
+        "@salesforce/mcp",
+        "--orgs", "ameyo",
+        "--toolsets", "orgs,data,metadata,users",
+        "--allow-non-ga-tools"
+      ]
     }
   }
 }
@@ -232,19 +236,20 @@ Then verify: `sf org list` should show `ameyo` as Connected.
 ### "npx timeout" or slow startup
 The first run downloads the MCP package via npx, which can be slow. Fix by installing globally:
 ```bash
-npm install -g @salesforcecli/mcp
+npm install -g @salesforce/mcp
 ```
-Then you can also update `.mcp.json` to use the direct path:
+Then you can also update `.mcp.json` to use the direct binary:
 ```json
 {
   "mcpServers": {
     "salesforce": {
       "type": "stdio",
       "command": "sf-mcp-server",
-      "env": {
-        "SALESFORCE_MCP_ORGS": "ameyo",
-        "SALESFORCE_MCP_TOOLSETS": "orgs,data,metadata,users"
-      }
+      "args": [
+        "--orgs", "ameyo",
+        "--toolsets", "orgs,data,metadata,users",
+        "--allow-non-ga-tools"
+      ]
     }
   }
 }

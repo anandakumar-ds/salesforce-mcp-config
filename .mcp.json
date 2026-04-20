@@ -3,11 +3,13 @@
     "salesforce": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@salesforcecli/mcp"],
-      "env": {
-        "SALESFORCE_MCP_ORGS": "ameyo",
-        "SALESFORCE_MCP_TOOLSETS": "orgs,data,metadata,users"
-      }
+      "args": [
+        "-y",
+        "@salesforce/mcp",
+        "--orgs", "ameyo",
+        "--toolsets", "orgs,data,metadata,users",
+        "--allow-non-ga-tools"
+      ]
     }
   }
 }
