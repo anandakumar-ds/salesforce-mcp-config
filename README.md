@@ -2,6 +2,8 @@
 
 Ready-to-use Salesforce MCP (Model Context Protocol) configuration for AI coding assistants at Exotel. Clone this repo and your AI tool can query Salesforce data using natural language.
 
+> **⚠️ Data access is scoped to YOUR Salesforce login.** The MCP server runs queries as the authenticated user. Whatever you can see in Salesforce UI / reports, the MCP can see — nothing more, nothing less. Sharing rules, role hierarchy, profile permissions, and field-level security all still apply. Two colleagues asking the same question may get different numbers if their access differs (e.g., Account Managers see only their own accounts; Sales Ops sees the full org). Authenticate with **your own** `@exotel.com` credentials in Step 2 — never share credentials. See [Data Access Scope](#data-access-scope) below.
+
 ## Supported Tools
 
 | Tool | Config File | Auto-detected | Loads `CLAUDE.md`? |
@@ -33,7 +35,9 @@ npm install -g @salesforce/cli
 sf org login web -a ameyo -r https://ameyo.my.salesforce.com
 ```
 
-This opens a browser window. Sign in with your `@exotel.com` Salesforce credentials.
+This opens a browser window. Sign in with **your own** `@exotel.com` Salesforce credentials.
+
+> **Important — use YOUR credentials, not someone else's.** The MCP queries run as whoever is logged in via SF CLI. Your data visibility (which accounts, opportunities, cases, revenue records you see) is governed by your Salesforce role, profile, sharing rules, and field-level security. Don't share or reuse another colleague's `~/.sfdx/` token — your queries will return their data, not yours.
 
 **Verify it worked:**
 ```bash
@@ -315,11 +319,37 @@ npm install -g @salesforce/cli
 
 ---
 
+## Data Access Scope
+
+**The MCP runs queries as whoever is authenticated via `sf org login`. Period.** Same data you see in the Salesforce UI, no more, no less.
+
+**What this means in practice:**
+
+| Question | What you'll see |
+|----------|-----------------|
+| "Show me my deals" / "my pipeline" | Your owned records — works the same for everyone. |
+| "Total FY26 revenue" | Sum of `accounts_revenue__c` rows **you have read access to**. If you only see your accounts, the total reflects only those. Sales Ops / Finance / Admins with org-wide read see the full org number. |
+| "Top 10 customers by revenue" | Top 10 from the slice of accounts you can read. May differ across colleagues. |
+| "Open cases for account X" | Only cases on accounts you have read access to. If you can't see the account, you can't see its cases. |
+| "Loss reasons across the org" | Aggregated from opportunities you can read. AMs typically see their own opps; cluster heads see their cluster's; managers see their reports' data. |
+
+**Things to know:**
+
+- **Sharing rules apply** — manual shares, criteria-based sharing, and role hierarchy bubble-up all govern what each user sees.
+- **Field-level security applies** — if your profile hides `GP__c` or `Net_New__c`, the MCP can't return it either. SOQL will silently exclude the field.
+- **Profile / Permission Set apply** — if you don't have "Read" on `accounts_revenue__c`, every revenue query returns zero rows for you.
+- **No "elevated" mode** — the MCP cannot bypass sharing, even for admins. If you need org-wide aggregates, you must already have org-wide read in SF.
+- **Per-user tokens** — each colleague authenticates separately on their own machine. Tokens live in `~/.sfdx/` locally, never in this repo, never shared.
+
+**If you're seeing fewer results than a colleague**, that's expected — it's reflecting the access difference, not a bug. Cross-check against a Salesforce report run with your login.
+
+---
+
 ## Security
 
 - No credentials are stored in this repo
-- Each user authenticates independently via Salesforce OAuth
-- Tokens are stored in your local system keychain (`~/.sfdx/`)
-- Data access respects your Salesforce profile permissions
-- All queries are read-only SOQL (no data modification)
+- Each user authenticates independently via Salesforce OAuth, with their own `@exotel.com` login
+- Tokens are stored in your local system keychain (`~/.sfdx/`) — never share these
+- Data access respects your Salesforce profile, permission sets, sharing rules, role hierarchy, and field-level security (see [Data Access Scope](#data-access-scope))
+- All MCP queries are read-only SOQL by default (no data modification with `data,metadata,users` toolsets)
 - The MCP server runs locally on your machine, not on a remote server

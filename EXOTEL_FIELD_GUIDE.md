@@ -20,6 +20,22 @@ For the full reference (Loss Reason values, every custom field, Tableau dashboar
 
 ---
 
+## Data Access Scope — READ FIRST
+
+**The MCP runs queries as the Salesforce user who logged in via `sf org login`.** Whatever the user can see in the Salesforce UI / reports is what the MCP returns — sharing rules, role hierarchy, profile, permission sets, and field-level security all apply.
+
+**What this means when answering:**
+
+- **"My deals" / "my pipeline"** — reliable for everyone (filters to the user's own ownership).
+- **Org-wide aggregates** ("total revenue", "top customers", "loss reasons") — return only the slice the user can read. An Account Manager may see only their accounts; Sales Ops / Finance / admins may see the full org. Two colleagues can get different numbers from the same question — that's expected.
+- **Field-level security** — if a profile hides `GP__c` or `Net_New__c`, SOQL silently returns null. If GP/cost fields show all zeros, mention this as a possibility.
+- **Access errors** — `INSUFFICIENT_ACCESS_OR_READONLY` means the user's profile lacks read on that object. Tell them to check with their SF admin; do not try to bypass.
+- **Phrase carefully** — when the user is not known to have org-wide read, say "across the records visible to you" rather than "across the org".
+
+**Do not** assume admin-level access. Do not compare numbers between users without flagging that scope may differ.
+
+---
+
 ## Revenue vs Bookings — TWO DIFFERENT SOURCES (CRITICAL)
 
 Getting this wrong is the #1 cause of bad answers. Exotel has two separate data sources and they give very different numbers.
@@ -322,15 +338,105 @@ Critical, Major, Minor (primary for Ameyo Care); Low, Medium, High, Urgent, P1, 
 
 ---
 
-## Retention Metrics
+## Retention Metrics (NRR / GRR / NRGP / GRGP)
 
-All computed on `accounts_revenue__c`:
+All computed on `accounts_revenue__c`. **Required dataset filter** (without these, numbers won't match Tableau):
+- `Product_Type__c IN ('Subscription','Resident Engg','AMC')`
+- `Revenue_Classification__c IN ('Retention 2','Retention 3')`  *(excludes Scaleup/Retention1 one-time)*
+- `Customer_Universal_Account__c != null`
 
-- **NRR** (Net Revenue Retention) = Current period revenue / Preceding period revenue (includes upsell/cross-sell)
-- **GRR** (Gross Revenue Retention) = Current period revenue / Preceding period revenue (excludes expansion)
-- **Net GPR** = NRR formula but using `GP__c`
-- **Gross GPR** = GRR formula but using `GP__c`
-- Variants: Rolling 3M, Rolling 12M, YTD
+| Metric | Formula |
+|--------|---------|
+| **NRR** | `SUM(current_rev) / SUM(preceding_rev) × 100` — includes upsell/cross-sell. Can exceed 100%. |
+| **GRR** | `SUM( min(current_rev, preceding_rev) per customer ) / SUM(preceding_rev) × 100` — **CAP RULE**: numerator capped at prior-period rev per customer. GRR ≤ 100% always. |
+| **NRGP** | NRR formula using `GP__c` |
+| **GRGP** | GRR formula using `GP__c` |
+
+**GRR cap example**: 10L → 14L contributes 10L (not 14L). 10L → 7L contributes 7L. Churn (current=0) contributes 0.
+
+**NRR variants**: Monthly (vs same month LY), Rolling 3M, Rolling 12M, YTD, QRR YoY, QRR Rolling 3M (sequential).
+
+---
+
+## Sales Cycle (CRM Buddy definition)
+- AVG of `B_Deal_Date__c − ISQL_Accepted_Date__c` for won deals.
+- Filter: `StageName IN ('Order','POC') AND ISQL_Accepted_Date__c != null AND B_Deal_Date__c != null`.
+- SOQL has no date arithmetic — fetch both fields, compute difference in post-processing.
+- **Never** use `CloseDate`. Fallback to `CreatedDate → B_Deal_Date__c` only when ISQL data is sparse.
+
+---
+
+## Normalized_MRR (Tableau pipeline measure)
+
+The **only** booking value that matches Tableau dashboards. Compute in summary, never in SOQL.
+
+| Deal segment | Formula |
+|--------------|---------|
+| Non-AMC, NOT POC stage | `Net_New__c × currency_rate / 36` |
+| Non-AMC, POC stage | `Net_New__c × currency_rate / 36 / Opportunity_Line_Item_Count__c` |
+| AMC (`Deal_Type__c = 'AMC'`) | `Net_New__c × currency_rate / 12` |
+
+**Currency rates by dashboard:**
+- Booking: USD = 85, AED = 22 · Revenue Actual: USD = 80 · Revenue Normalized: USD = 75 · Working avg: USD = 83, AED = 23
+
+`Net_New_INR__c` diverges from Normalized_MRR by 5×–14× for POC and AMC deals. When a number doesn't match the dashboard, check whether `Net_New_INR__c` was used by mistake.
+
+---
+
+## Loss Analysis (Tableau dashboard)
+- **Stage filter** (EXACT — `Rejected` and `SDF Rejected` are NOT included): `StageName IN ('Closed Lost','Closed Unknown','Closed-No decision','Closed Duplicate')`.
+- **Date filter**: `Opp_Actual_Closure_Date__c` (or `Opp_Closure_Date__c`). **Never** `CloseDate` (that's expected close).
+- **Value**: Normalized_MRR (Net_New_INR__c is zero on lost deals). Use `Normalize_Amount_INR__c` for ranking.
+- **Loss_Theme__c values** (8 themes): Pricing and Budget Constraints, Relationship, Product Fit and Features, Internal Customer Factors, Other External Factors, Execution and Timing Issues, Lack of Value Proposition, Technical and Security Concerns.
+
+---
+
+## Opportunity Analysis — Date Logic
+
+Tableau routes the date filter via an Analysis Type selector. Identify the type first, then apply per `ISQL_Stage__c`:
+
+| Analysis Type | Trigger phrases | ISQL Accepted | ISQL Pending | ISQL Rejected |
+|---------------|----------------|---------------|--------------|---------------|
+| **Accepted** (default) | "accepted pipeline", "ISQL accepted" | `ISQL_Accepted_Date__c` | excluded | excluded |
+| **Creation** | "by creation date", "created opportunities" | `ISQL_Accepted_Date__c` | `COALESCE(Actual_Created_Date__c, CreatedDate)` | `ISQL_Rejected_Date__c` |
+| **Forecast** | "forecast view", "expected close" | `CloseDate` (also filter `Forecast_Category__c IN ('Upside','Commit')`) | same | same |
+
+---
+
+## Penetration Index (ACI / API / PPI / PPI-HM / GPI)
+
+All counts at `Customer_Universal_Account__c` level. **Excluded clusters** (applied to ALL Penetration metrics):
+```
+Customer_Universal_Account__r.Cluster__c NOT IN
+  ('APAC','Financial Services','Internal','Partnerships','Services','SMB')
+```
+
+| Metric | Formula |
+|--------|---------|
+| **ACI** | `COUNT_DISTINCT(accounts with rev > 0) / COUNT_DISTINCT(eligible accounts) × 100` |
+| **API** | Per-account rev ≥ threshold. Domestic ≥ ₹12L/year. International ≥ $24K/year. API % = qualifying / total eligible × 100. |
+| **PPI** | ≥ 2 distinct `Parent_SKU__c`. Domestic: any 2 SKUs. International: any 2 of {Voice, SMS, WhatsApp, Number Masking, Cogno}. PPI % = multi-product / API-qualifying × 100. |
+| **PPI-HM** | Same as PPI but ≥ 3 SKUs AND account age > 12 months. |
+| **GPI** | QoQ rev growth ≥ 20%. GPI % = growth accounts / API-qualifying × 100. |
+
+---
+
+## Variance Analysis (Target vs Actual)
+
+**Targets**: `Booking_Target__c` (booking) · `Target__c` (revenue/GP — `BVT__c`, `Sale_Person_Name__c`, `Year__c`, `Quarter__c`, `Target_Type__c`, `M1__c`/`M2__c`/`M3__c` per-month).
+
+**Actuals**: Opportunity (`Net_New_INR__c`, `B_Deal_Date__c`) · `accounts_revenue__c` (`Revenue_Booked_Amount__c`, `GP__c`).
+
+| Period | Actual | Target |
+|--------|--------|--------|
+| MTD | SUM in current month so far | `M{N}__c` from Target__c (N = month within quarter) |
+| QTD | SUM Q-start to today | `SUM(BVT__c)` for active `Quarter__c` |
+| YTD | SUM FY-start to today | `SUM(BVT__c)` of elapsed quarters for `Year__c` |
+| Full-Year | SUM full FY | `SUM(BVT__c)` for the FY |
+
+`Achievement % = Actual / Target × 100`. `Variance = Actual − Target`.
+
+Currency: include `Currency__c` in SELECT and convert in summary (rates above).
 
 ---
 
