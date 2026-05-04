@@ -99,6 +99,7 @@ Copy the output.
 {
   "mcpServers": {
     "salesforce": {
+      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
