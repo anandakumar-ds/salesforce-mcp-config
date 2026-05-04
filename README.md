@@ -132,6 +132,9 @@ The guide is ~20k chars and covers 90% of real queries (revenue vs bookings spli
 
 ---
 
+### Claude Skill
+If you want Claude Desktop to recall how to use Exotel's SFDC setup, you can add this knowledge as a skill.  Upload the file `exotel-salesforce-setup.skill` by navigating to Claude Desktop > Cowork > Customize > Skills > Add skill > Create skill > Upload a skill
+
 ## Global Setup (Use Salesforce MCP in Any Project)
 
 If you want the Salesforce MCP available everywhere (not just inside this repo), add it to your global Claude Code config:
